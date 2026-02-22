@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { TOOLS } from '../../src/mcp.js';
+import { buildToolList, TOOLS } from '../../src/mcp.js';
 
 const ALL_TOOL_NAMES = [
   'query_function',
@@ -152,6 +152,30 @@ describe('TOOLS', () => {
   });
 });
 
+// ─── buildToolList ──────────────────────────────────────────────────
+
+describe('buildToolList', () => {
+  it('single-repo mode excludes list_repos and repo property', () => {
+    const tools = buildToolList(false);
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('list_repos');
+    for (const tool of tools) {
+      expect(tool.inputSchema.properties).not.toHaveProperty('repo');
+    }
+  });
+
+  it('multi-repo mode includes list_repos and repo property on all other tools', () => {
+    const tools = buildToolList(true);
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('list_repos');
+    for (const tool of tools) {
+      if (tool.name === 'list_repos') continue;
+      expect(tool.inputSchema.properties).toHaveProperty('repo');
+      expect(tool.inputSchema.properties.repo.type).toBe('string');
+    }
+  });
+});
+
 // ─── startMCPServer handler logic ────────────────────────────────────
 
 describe('startMCPServer handler dispatch', () => {
@@ -189,9 +213,10 @@ describe('startMCPServer handler dispatch', () => {
     const { startMCPServer } = await import('../../src/mcp.js');
     await startMCPServer('/tmp/test.db');
 
-    // Test tools/list
+    // Test tools/list — single-repo mode by default (no list_repos)
     const toolsList = await handlers['tools/list']();
-    expect(toolsList.tools.length).toBe(ALL_TOOL_NAMES.length);
+    expect(toolsList.tools.length).toBe(ALL_TOOL_NAMES.length - 1);
+    expect(toolsList.tools.map((t) => t.name)).not.toContain('list_repos');
 
     // Test query_function dispatch
     const result = await handlers['tools/call']({
@@ -424,7 +449,7 @@ describe('startMCPServer handler dispatch', () => {
     }));
 
     const { startMCPServer } = await import('../../src/mcp.js');
-    await startMCPServer();
+    await startMCPServer(undefined, { multiRepo: true });
 
     const result = await handlers['tools/call']({
       params: { name: 'query_function', arguments: { name: 'test', repo: 'my-project' } },
@@ -467,7 +492,7 @@ describe('startMCPServer handler dispatch', () => {
     }));
 
     const { startMCPServer } = await import('../../src/mcp.js');
-    await startMCPServer();
+    await startMCPServer(undefined, { multiRepo: true });
 
     const result = await handlers['tools/call']({
       params: { name: 'query_function', arguments: { name: 'test', repo: 'unknown-repo' } },
@@ -653,7 +678,7 @@ describe('startMCPServer handler dispatch', () => {
     }));
 
     const { startMCPServer } = await import('../../src/mcp.js');
-    await startMCPServer();
+    await startMCPServer(undefined, { multiRepo: true });
 
     const result = await handlers['tools/call']({
       params: { name: 'list_repos', arguments: {} },
@@ -664,6 +689,126 @@ describe('startMCPServer handler dispatch', () => {
     vi.doUnmock('@modelcontextprotocol/sdk/server/index.js');
     vi.doUnmock('@modelcontextprotocol/sdk/server/stdio.js');
     vi.doUnmock('../../src/registry.js');
+    vi.doUnmock('../../src/queries.js');
+  });
+
+  it('rejects repo param in single-repo mode', async () => {
+    const handlers = {};
+
+    vi.doMock('@modelcontextprotocol/sdk/server/index.js', () => ({
+      Server: class MockServer {
+        setRequestHandler(name, handler) {
+          handlers[name] = handler;
+        }
+        async connect() {}
+      },
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
+      StdioServerTransport: class MockTransport {},
+    }));
+    vi.doMock('../../src/queries.js', () => ({
+      queryNameData: vi.fn(),
+      impactAnalysisData: vi.fn(),
+      moduleMapData: vi.fn(),
+      fileDepsData: vi.fn(),
+      fnDepsData: vi.fn(),
+      fnImpactData: vi.fn(),
+      diffImpactData: vi.fn(),
+      listFunctionsData: vi.fn(),
+    }));
+
+    const { startMCPServer } = await import('../../src/mcp.js');
+    await startMCPServer('/tmp/test.db');
+
+    const result = await handlers['tools/call']({
+      params: { name: 'query_function', arguments: { name: 'test', repo: 'some-repo' } },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Multi-repo access is disabled');
+    expect(result.content[0].text).toContain('--multi-repo');
+
+    vi.doUnmock('@modelcontextprotocol/sdk/server/index.js');
+    vi.doUnmock('@modelcontextprotocol/sdk/server/stdio.js');
+    vi.doUnmock('../../src/queries.js');
+  });
+
+  it('rejects list_repos in single-repo mode', async () => {
+    const handlers = {};
+
+    vi.doMock('@modelcontextprotocol/sdk/server/index.js', () => ({
+      Server: class MockServer {
+        setRequestHandler(name, handler) {
+          handlers[name] = handler;
+        }
+        async connect() {}
+      },
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
+      StdioServerTransport: class MockTransport {},
+    }));
+    vi.doMock('../../src/queries.js', () => ({
+      queryNameData: vi.fn(),
+      impactAnalysisData: vi.fn(),
+      moduleMapData: vi.fn(),
+      fileDepsData: vi.fn(),
+      fnDepsData: vi.fn(),
+      fnImpactData: vi.fn(),
+      diffImpactData: vi.fn(),
+      listFunctionsData: vi.fn(),
+    }));
+
+    const { startMCPServer } = await import('../../src/mcp.js');
+    await startMCPServer('/tmp/test.db');
+
+    const result = await handlers['tools/call']({
+      params: { name: 'list_repos', arguments: {} },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Multi-repo access is disabled');
+    expect(result.content[0].text).toContain('--multi-repo');
+
+    vi.doUnmock('@modelcontextprotocol/sdk/server/index.js');
+    vi.doUnmock('@modelcontextprotocol/sdk/server/stdio.js');
+    vi.doUnmock('../../src/queries.js');
+  });
+
+  it('tools/list in single-repo mode has no repo property and no list_repos', async () => {
+    const handlers = {};
+
+    vi.doMock('@modelcontextprotocol/sdk/server/index.js', () => ({
+      Server: class MockServer {
+        setRequestHandler(name, handler) {
+          handlers[name] = handler;
+        }
+        async connect() {}
+      },
+    }));
+    vi.doMock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
+      StdioServerTransport: class MockTransport {},
+    }));
+    vi.doMock('../../src/queries.js', () => ({
+      queryNameData: vi.fn(),
+      impactAnalysisData: vi.fn(),
+      moduleMapData: vi.fn(),
+      fileDepsData: vi.fn(),
+      fnDepsData: vi.fn(),
+      fnImpactData: vi.fn(),
+      diffImpactData: vi.fn(),
+      listFunctionsData: vi.fn(),
+    }));
+
+    const { startMCPServer } = await import('../../src/mcp.js');
+    await startMCPServer('/tmp/test.db');
+
+    const toolsList = await handlers['tools/list']();
+    const names = toolsList.tools.map((t) => t.name);
+    expect(names).not.toContain('list_repos');
+    for (const tool of toolsList.tools) {
+      expect(tool.inputSchema.properties).not.toHaveProperty('repo');
+    }
+
+    vi.doUnmock('@modelcontextprotocol/sdk/server/index.js');
+    vi.doUnmock('@modelcontextprotocol/sdk/server/stdio.js');
     vi.doUnmock('../../src/queries.js');
   });
 });

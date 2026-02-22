@@ -193,10 +193,12 @@ program
   .command('mcp')
   .description('Start MCP (Model Context Protocol) server for AI assistant integration')
   .option('-d, --db <path>', 'Path to graph.db')
+  .option('--multi-repo', 'Enable access to all registered repositories')
   .option('--repos <names>', 'Comma-separated list of allowed repo names (restricts access)')
   .action(async (opts) => {
     const { startMCPServer } = await import('./mcp.js');
     const mcpOpts = {};
+    mcpOpts.multiRepo = opts.multiRepo || !!opts.repos;
     if (opts.repos) {
       mcpOpts.allowedRepos = opts.repos.split(',').map((s) => s.trim());
     }
