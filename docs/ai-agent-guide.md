@@ -533,6 +533,7 @@ Hooks automate codegraph integration so the agent gets structural context withou
 | Hook | Event | Purpose |
 |------|-------|---------|
 | `enrich-context.sh` | PreToolUse (Read, Grep) | Injects dependency info before file reads |
+| `remind-codegraph.sh` | PreToolUse (Edit, Write) | Reminds agent to check context/impact before editing |
 | `update-graph.sh` | PostToolUse (Edit, Write) | Rebuilds graph after code changes |
 | `guard-git.sh` | PreToolUse (Bash) | Blocks dangerous git ops, validates commits |
 | `track-edits.sh` | PostToolUse (Edit, Write) | Logs edits for commit validation |
@@ -553,6 +554,22 @@ Hooks automate codegraph integration so the agent gets structural context withou
 ```
 
 **Requirements:** `.codegraph/graph.db` must exist (run `codegraph build` first). Fails gracefully if missing.
+
+### `remind-codegraph.sh` — Nudge the agent to check before editing
+
+**Trigger:** Before any Edit or Write operation (PreToolUse).
+
+**What it does:** The first time the agent edits a source file, the hook injects a reminder via `additionalContext` to run `where`, `explain`, `context`, and `fn-impact` before proceeding. Subsequent edits to the same file in the same session are silently allowed (tracked in `.claude/codegraph-checked.log`).
+
+**Example output the agent sees:**
+
+```
+[codegraph reminder] You are about to edit src/parser.js. Did you run codegraph first?
+Before editing, always: (1) where <name>, (2) explain src/parser.js,
+(3) context <name> -T, (4) fn-impact <name> -T. If you already did this, proceed.
+```
+
+**Design:** Non-blocking (always allows the edit), skips non-source files (`.md`, `.json`, `.yml`, etc.), and only fires once per file per session to avoid noise. The checked log is gitignored.
 
 ### `update-graph.sh` — Keep the graph fresh
 
@@ -593,6 +610,15 @@ Add to `.claude/settings.json`:
           {
             "type": "command",
             "command": "bash .claude/hooks/enrich-context.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/remind-codegraph.sh"
           }
         ]
       },

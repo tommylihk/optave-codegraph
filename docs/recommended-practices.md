@@ -190,12 +190,22 @@ You can configure [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read",
+        "matcher": "Read|Grep",
         "hooks": [
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/enrich-context.sh\"",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/remind-codegraph.sh\"",
+            "timeout": 5
           }
         ]
       }
@@ -230,12 +240,15 @@ You can configure [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-
 > }
 > ```
 
+**Edit reminder hook** (PreToolUse on Edit/Write): before the agent writes code, a reminder is injected via `additionalContext` prompting it to check `where`, `explain`, `context`, and `fn-impact` first. Only fires once per file per session (tracks in `.claude/codegraph-checked.log`, gitignored). Non-blocking — it nudges but never prevents the edit. Skips non-source files like `.md`, `.json`, `.yml`.
+
 **Graph update hook** (PostToolUse on Edit/Write): keeps the graph incrementally updated after each file edit. Only changed files are re-parsed.
 
 > **Windows note:** If your hooks use bash scripts, normalize backslashes inside `node -e` rather than bash (`${VAR//\\//}` fails on Git Bash). See this repo's `.claude/hooks/enrich-context.sh` for the pattern.
 
 See this repo's `.claude/hooks/` directory for working implementations:
 - `enrich-context.sh` — dependency context injection
+- `remind-codegraph.sh` — pre-edit reminder to check context/impact
 - `update-graph.sh` — incremental graph updates after edits
 - `guard-git.sh` — blocks dangerous git commands + validates branch names
 - `track-edits.sh` — logs edited files for commit validation
