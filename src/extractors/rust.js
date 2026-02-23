@@ -22,7 +22,7 @@ export function extractRustSymbols(tree, _filePath) {
     return null;
   }
 
-  function walk(node) {
+  function walkRustNode(node) {
     switch (node.type) {
       case 'function_item': {
         const nameNode = node.childForFieldName('name');
@@ -153,10 +153,10 @@ export function extractRustSymbols(tree, _filePath) {
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+    for (let i = 0; i < node.childCount; i++) walkRustNode(node.child(i));
   }
 
-  walk(tree.rootNode);
+  walkRustNode(tree.rootNode);
   return { definitions, calls, imports, classes, exports };
 }
 

@@ -26,7 +26,7 @@ export function extractRubySymbols(tree, _filePath) {
     return null;
   }
 
-  function walk(node) {
+  function walkRubyNode(node) {
     switch (node.type) {
       case 'class': {
         const nameNode = node.childForFieldName('name');
@@ -177,9 +177,9 @@ export function extractRubySymbols(tree, _filePath) {
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+    for (let i = 0; i < node.childCount; i++) walkRubyNode(node.child(i));
   }
 
-  walk(tree.rootNode);
+  walkRubyNode(tree.rootNode);
   return { definitions, calls, imports, classes, exports };
 }

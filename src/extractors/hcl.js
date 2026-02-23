@@ -7,7 +7,7 @@ export function extractHCLSymbols(tree, _filePath) {
   const definitions = [];
   const imports = [];
 
-  function walk(node) {
+  function walkHclNode(node) {
     if (node.type === 'block') {
       const children = [];
       for (let i = 0; i < node.childCount; i++) children.push(node.child(i));
@@ -65,9 +65,9 @@ export function extractHCLSymbols(tree, _filePath) {
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+    for (let i = 0; i < node.childCount; i++) walkHclNode(node.child(i));
   }
 
-  walk(tree.rootNode);
+  walkHclNode(tree.rootNode);
   return { definitions, calls: [], imports, classes: [], exports: [] };
 }

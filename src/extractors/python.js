@@ -10,7 +10,7 @@ export function extractPythonSymbols(tree, _filePath) {
   const classes = [];
   const exports = [];
 
-  function walk(node) {
+  function walkPythonNode(node) {
     switch (node.type) {
       case 'function_definition': {
         const nameNode = node.childForFieldName('name');
@@ -61,7 +61,7 @@ export function extractPythonSymbols(tree, _filePath) {
       }
 
       case 'decorated_definition': {
-        for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+        for (let i = 0; i < node.childCount; i++) walkPythonNode(node.child(i));
         return;
       }
 
@@ -123,7 +123,7 @@ export function extractPythonSymbols(tree, _filePath) {
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+    for (let i = 0; i < node.childCount; i++) walkPythonNode(node.child(i));
   }
 
   function findPythonParentClass(node) {
@@ -138,6 +138,6 @@ export function extractPythonSymbols(tree, _filePath) {
     return null;
   }
 
-  walk(tree.rootNode);
+  walkPythonNode(tree.rootNode);
   return { definitions, calls, imports, classes, exports };
 }

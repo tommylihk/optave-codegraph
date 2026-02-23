@@ -26,7 +26,7 @@ export function extractPHPSymbols(tree, _filePath) {
     return null;
   }
 
-  function walk(node) {
+  function walkPhpNode(node) {
     switch (node.type) {
       case 'function_definition': {
         const nameNode = node.childForFieldName('name');
@@ -229,9 +229,9 @@ export function extractPHPSymbols(tree, _filePath) {
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+    for (let i = 0; i < node.childCount; i++) walkPhpNode(node.child(i));
   }
 
-  walk(tree.rootNode);
+  walkPhpNode(tree.rootNode);
   return { definitions, calls, imports, classes, exports };
 }

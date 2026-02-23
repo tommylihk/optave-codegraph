@@ -28,7 +28,7 @@ export function extractCSharpSymbols(tree, _filePath) {
     return null;
   }
 
-  function walk(node) {
+  function walkCSharpNode(node) {
     switch (node.type) {
       case 'class_declaration': {
         const nameNode = node.childForFieldName('name');
@@ -208,10 +208,10 @@ export function extractCSharpSymbols(tree, _filePath) {
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) walk(node.child(i));
+    for (let i = 0; i < node.childCount; i++) walkCSharpNode(node.child(i));
   }
 
-  walk(tree.rootNode);
+  walkCSharpNode(tree.rootNode);
   return { definitions, calls, imports, classes, exports };
 }
 

@@ -10,7 +10,7 @@ export function extractSymbols(tree, _filePath) {
   const classes = [];
   const exports = [];
 
-  function walk(node) {
+  function walkJavaScriptNode(node) {
     switch (node.type) {
       case 'function_declaration': {
         const nameNode = node.childForFieldName('name');
@@ -254,11 +254,11 @@ export function extractSymbols(tree, _filePath) {
     }
 
     for (let i = 0; i < node.childCount; i++) {
-      walk(node.child(i));
+      walkJavaScriptNode(node.child(i));
     }
   }
 
-  walk(tree.rootNode);
+  walkJavaScriptNode(tree.rootNode);
   return { definitions, calls, imports, classes, exports };
 }
 
