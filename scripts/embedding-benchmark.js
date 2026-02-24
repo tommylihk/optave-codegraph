@@ -39,8 +39,7 @@ function splitIdentifier(name) {
 		.replace(/([a-z])([A-Z])/g, '$1 $2')
 		.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
 		.replace(/[_-]+/g, ' ')
-		.trim()
-		.toLowerCase();
+		.trim();
 }
 
 function loadSymbols() {
