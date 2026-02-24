@@ -158,7 +158,8 @@ export function readFileSafe(filePath, retries = 2) {
       return fs.readFileSync(filePath, 'utf-8');
     } catch (err) {
       if (attempt < retries && TRANSIENT_CODES.has(err.code)) {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, RETRY_DELAY_MS);
+        const end = Date.now() + RETRY_DELAY_MS;
+        while (Date.now() < end) {}
         continue;
       }
       throw err;
