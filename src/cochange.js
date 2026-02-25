@@ -124,7 +124,7 @@ export function computeCoChanges(commits, opts = {}) {
     });
   }
 
-  return results;
+  return { pairs: results, fileCommitCounts };
 }
 
 /**
@@ -170,6 +170,7 @@ export function analyzeCoChanges(customDbPath, opts = {}) {
   if (opts.full) {
     db.exec('DELETE FROM co_changes');
     db.exec('DELETE FROM co_change_meta');
+    db.exec('DELETE FROM file_commit_counts');
   }
 
   // Collect known files from the graph for filtering
@@ -182,25 +183,53 @@ export function analyzeCoChanges(customDbPath, opts = {}) {
   }
 
   const { commits } = scanGitHistory(repoRoot, { since, afterSha });
-  const coChanges = computeCoChanges(commits, { minSupport, maxFilesPerCommit, knownFiles });
+  const { pairs: coChanges, fileCommitCounts } = computeCoChanges(commits, {
+    minSupport,
+    maxFilesPerCommit,
+    knownFiles,
+  });
 
-  // Write results
-  const upsert = db.prepare(`
+  // Upsert per-file commit counts so Jaccard can be recomputed from totals
+  const fileCountUpsert = db.prepare(`
+    INSERT INTO file_commit_counts (file, commit_count) VALUES (?, ?)
+    ON CONFLICT(file) DO UPDATE SET commit_count = commit_count + excluded.commit_count
+  `);
+
+  // Upsert pair counts (accumulate commit_count, jaccard placeholder — recomputed below)
+  const pairUpsert = db.prepare(`
     INSERT INTO co_changes (file_a, file_b, commit_count, jaccard, last_commit_epoch)
-    VALUES (?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, 0, ?)
     ON CONFLICT(file_a, file_b) DO UPDATE SET
       commit_count = commit_count + excluded.commit_count,
-      jaccard = excluded.jaccard,
       last_commit_epoch = MAX(co_changes.last_commit_epoch, excluded.last_commit_epoch)
   `);
 
-  const insertMany = db.transaction((pairs) => {
-    for (const [key, data] of pairs) {
+  const insertMany = db.transaction(() => {
+    for (const [file, count] of fileCommitCounts) {
+      fileCountUpsert.run(file, count);
+    }
+    for (const [key, data] of coChanges) {
       const [fileA, fileB] = key.split('\0');
-      upsert.run(fileA, fileB, data.commitCount, data.jaccard, data.lastEpoch);
+      pairUpsert.run(fileA, fileB, data.commitCount, data.lastEpoch);
     }
   });
-  insertMany(coChanges);
+  insertMany();
+
+  // Recompute Jaccard for all affected pairs from total file commit counts
+  const affectedFiles = [...fileCommitCounts.keys()];
+  if (affectedFiles.length > 0) {
+    const ph = affectedFiles.map(() => '?').join(',');
+    db.prepare(`
+      UPDATE co_changes SET jaccard = (
+        SELECT CAST(co_changes.commit_count AS REAL) / (
+          COALESCE(fa.commit_count, 0) + COALESCE(fb.commit_count, 0) - co_changes.commit_count
+        )
+        FROM file_commit_counts fa, file_commit_counts fb
+        WHERE fa.file = co_changes.file_a AND fb.file = co_changes.file_b
+      )
+      WHERE file_a IN (${ph}) OR file_b IN (${ph})
+    `).run(...affectedFiles, ...affectedFiles);
+  }
 
   // Update metadata
   const metaUpsert = db.prepare(`

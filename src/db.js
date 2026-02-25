@@ -92,6 +92,15 @@ export const MIGRATIONS = [
       );
     `,
   },
+  {
+    version: 6,
+    up: `
+      CREATE TABLE IF NOT EXISTS file_commit_counts (
+        file TEXT PRIMARY KEY,
+        commit_count INTEGER NOT NULL DEFAULT 0
+      );
+    `,
+  },
 ];
 
 export function openDb(dbPath) {

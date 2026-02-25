@@ -32,7 +32,7 @@ describe('computeCoChanges', () => {
     ];
     // a.js appears in 4 commits, b.js in 3, pair(a,b) = 3
     // jaccard(a,b) = 3 / (4 + 3 - 3) = 3/4 = 0.75
-    const result = computeCoChanges(commits, { minSupport: 1 });
+    const { pairs: result } = computeCoChanges(commits, { minSupport: 1 });
     const abKey = 'a.js\0b.js';
     expect(result.has(abKey)).toBe(true);
     expect(result.get(abKey).jaccard).toBeCloseTo(0.75);
@@ -45,7 +45,7 @@ describe('computeCoChanges', () => {
       { sha: 'a2', epoch: 2000, files: ['a.js', 'b.js'] },
       { sha: 'a3', epoch: 3000, files: ['a.js', 'c.js'] },
     ];
-    const result = computeCoChanges(commits, { minSupport: 3 });
+    const { pairs: result } = computeCoChanges(commits, { minSupport: 3 });
     // pair(a,b) only has 2 co-occurrences, pair(a,c) only 1
     expect(result.size).toBe(0);
   });
@@ -57,7 +57,7 @@ describe('computeCoChanges', () => {
       { sha: 'a3', epoch: 3000, files: ['a.js', 'b.js'] },
       { sha: 'a4', epoch: 4000, files: ['a.js', 'b.js'] },
     ];
-    const result = computeCoChanges(commits, { minSupport: 3, maxFilesPerCommit: 3 });
+    const { pairs: result } = computeCoChanges(commits, { minSupport: 3, maxFilesPerCommit: 3 });
     // First commit skipped (4 files > max 3)
     // pair(a,b) = 3 from commits a2,a3,a4; a appears in 3 commits, b in 3
     // jaccard = 3/(3+3-3) = 1.0
@@ -72,14 +72,14 @@ describe('computeCoChanges', () => {
       { sha: 'a2', epoch: 2000, files: ['z.js', 'a.js'] },
       { sha: 'a3', epoch: 3000, files: ['z.js', 'a.js'] },
     ];
-    const result = computeCoChanges(commits, { minSupport: 1 });
+    const { pairs: result } = computeCoChanges(commits, { minSupport: 1 });
     // Should be stored as a.js < z.js
     expect(result.has('a.js\0z.js')).toBe(true);
     expect(result.has('z.js\0a.js')).toBe(false);
   });
 
   test('empty input returns empty map', () => {
-    const result = computeCoChanges([], { minSupport: 1 });
+    const { pairs: result } = computeCoChanges([], { minSupport: 1 });
     expect(result.size).toBe(0);
   });
 
@@ -89,7 +89,7 @@ describe('computeCoChanges', () => {
       { sha: 'a2', epoch: 5000, files: ['a.js', 'b.js'] },
       { sha: 'a3', epoch: 3000, files: ['a.js', 'b.js'] },
     ];
-    const result = computeCoChanges(commits, { minSupport: 1 });
+    const { pairs: result } = computeCoChanges(commits, { minSupport: 1 });
     expect(result.get('a.js\0b.js').lastEpoch).toBe(5000);
   });
 
@@ -100,7 +100,7 @@ describe('computeCoChanges', () => {
       { sha: 'a3', epoch: 3000, files: ['a.js', 'b.js', 'c.js'] },
     ];
     const knownFiles = new Set(['a.js', 'b.js']);
-    const result = computeCoChanges(commits, { minSupport: 1, knownFiles });
+    const { pairs: result } = computeCoChanges(commits, { minSupport: 1, knownFiles });
     expect(result.has('a.js\0b.js')).toBe(true);
     // c.js pairs should not exist
     expect(result.has('a.js\0c.js')).toBe(false);
