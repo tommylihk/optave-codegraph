@@ -125,12 +125,18 @@ export function exportDOT(db, opts = {}) {
   return lines.join('\n');
 }
 
+/** Escape double quotes for Mermaid labels. */
+function escapeLabel(label) {
+  return label.replace(/"/g, '#quot;');
+}
+
 /** Map node kind to Mermaid shape wrapper. */
 function mermaidShape(kind, label) {
+  const escaped = escapeLabel(label);
   switch (kind) {
     case 'function':
     case 'method':
-      return `(["${label}"])`;
+      return `(["${escaped}"])`;
     case 'class':
     case 'interface':
     case 'type':
@@ -138,11 +144,11 @@ function mermaidShape(kind, label) {
     case 'enum':
     case 'trait':
     case 'record':
-      return `{{"${label}"}}`;
+      return `{{"${escaped}"}}`;
     case 'module':
-      return `[["${label}"]]`;
+      return `[["${escaped}"]]`;
     default:
-      return `["${label}"]`;
+      return `["${escaped}"]`;
   }
 }
 
@@ -222,15 +228,15 @@ export function exportMermaid(db, opts = {}) {
     // Emit subgraphs
     for (const [dir, files] of [...dirs].sort((a, b) => a[0].localeCompare(b[0]))) {
       const sgId = dir.replace(/[^a-zA-Z0-9]/g, '_');
-      lines.push(`  subgraph ${sgId}["${dir}"]`);
+      lines.push(`  subgraph ${sgId}["${escapeLabel(dir)}"]`);
       for (const f of files) {
         const nId = nodeId(f);
-        lines.push(`    ${nId}["${path.basename(f)}"]`);
+        lines.push(`    ${nId}["${escapeLabel(path.basename(f))}"]`);
       }
       lines.push('  end');
     }
 
-    // Deduplicate edges per source-target pair, picking the most specific kind
+    // Deduplicate edges per source-target pair, keeping the first encountered kind
     const edgeMap = new Map();
     for (const { source, target, edge_kind } of edges) {
       const key = `${source}|${target}`;
@@ -280,7 +286,7 @@ export function exportMermaid(db, opts = {}) {
     // Emit subgraphs grouped by file
     for (const [file, nodes] of [...fileNodes].sort((a, b) => a[0].localeCompare(b[0]))) {
       const sgId = file.replace(/[^a-zA-Z0-9]/g, '_');
-      lines.push(`  subgraph ${sgId}["${file}"]`);
+      lines.push(`  subgraph ${sgId}["${escapeLabel(file)}"]`);
       for (const [key, name] of nodes) {
         const kind = nodeKinds.get(key);
         lines.push(`    ${nodeId(key)}${mermaidShape(kind, name)}`);
