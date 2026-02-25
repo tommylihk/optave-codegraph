@@ -236,16 +236,17 @@ export function exportMermaid(db, opts = {}) {
       lines.push('  end');
     }
 
-    // Deduplicate edges per source-target pair, keeping the first encountered kind
+    // Deduplicate edges per source-target pair, collecting all distinct kinds
     const edgeMap = new Map();
     for (const { source, target, edge_kind } of edges) {
       const key = `${source}|${target}`;
       const label = edge_kind === 'imports-type' ? 'imports' : edge_kind;
-      if (!edgeMap.has(key)) edgeMap.set(key, { source, target, label });
+      if (!edgeMap.has(key)) edgeMap.set(key, { source, target, labels: new Set() });
+      edgeMap.get(key).labels.add(label);
     }
 
-    for (const { source, target, label } of edgeMap.values()) {
-      lines.push(`  ${nodeId(source)} -->|${label}| ${nodeId(target)}`);
+    for (const { source, target, labels } of edgeMap.values()) {
+      lines.push(`  ${nodeId(source)} -->|${[...labels].join(', ')}| ${nodeId(target)}`);
     }
   } else {
     let edges = db
