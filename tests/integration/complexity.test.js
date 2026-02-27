@@ -242,6 +242,14 @@ describe('complexityData', () => {
     expect(data.functions.length).toBe(0);
   });
 
+  test('produces correct exceeds and aboveWarn with valid thresholds', () => {
+    const data = complexityData(dbPath);
+    expect(data.summary.aboveWarn).toBeGreaterThan(0);
+    const handleReq = data.functions.find((f) => f.name === 'handleRequest');
+    expect(handleReq.exceeds).toBeDefined();
+    expect(handleReq.exceeds.length).toBeGreaterThan(0);
+  });
+
   // ─── Halstead / MI Tests ─────────────────────────────────────────────
 
   test('functions include halstead and MI data', () => {
