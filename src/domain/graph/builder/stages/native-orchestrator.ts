@@ -587,6 +587,7 @@ function runPostNativeCha(
            JOIN nodes src ON e.source_id = src.id
            WHERE e.kind = 'calls' AND tgt.kind = 'method'
            AND INSTR(tgt.name, '.') > 0
+           AND (e.technique IS NULL OR e.technique != 'cha')
            AND src.file IN (${ph})`,
         )
         .all(...chunk) as Array<{
@@ -606,6 +607,7 @@ function runPostNativeCha(
         JOIN nodes src ON e.source_id = src.id
         WHERE e.kind = 'calls' AND tgt.kind = 'method'
         AND INSTR(tgt.name, '.') > 0
+        AND (e.technique IS NULL OR e.technique != 'cha')
       `)
       .all() as Array<{ source_id: number; method_name: string; caller_file: string | null }>;
   }
@@ -785,8 +787,20 @@ async function runPostNativeThisDispatch(
           JOIN nodes tgt ON e.target_id = tgt.id
           WHERE e.kind = 'extends' AND tgt.file IS NOT NULL
           UNION
-          SELECT file FROM nodes
-          WHERE kind = 'method' AND INSTR(name, '.') > 0 AND file IS NOT NULL
+          -- Files with func-prop method definitions (e.g. f.h = function(){this.g()}).
+          -- Only include files where the method's owner prefix is NOT a known class name —
+          -- this keeps the re-parse set small (func-prop files only, not all class-method files).
+          -- AND name IS NOT NULL guards the NOT IN sub-select: if any class node had a NULL
+          -- name the entire NOT IN clause would silently return no rows (SQL NULL semantics).
+          SELECT n.file AS file
+          FROM nodes n
+          WHERE n.kind = 'method'
+          AND INSTR(n.name, '.') > 0
+          AND n.file IS NOT NULL
+          AND SUBSTR(n.name, 1, INSTR(n.name, '.') - 1) NOT IN (
+            SELECT name FROM nodes WHERE kind IN ('class', 'struct', 'interface', 'type')
+            AND name IS NOT NULL
+          )
         )
       `)
       .all() as Array<{ file: string }>;
@@ -926,6 +940,7 @@ async function runPostNativeThisDispatch(
         call.receiver as 'this' | 'super',
         chaCtx,
         lookup,
+        relPath,
       );
 
       for (const t of targets) {
