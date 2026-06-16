@@ -1230,10 +1230,35 @@ async function backfillNativeDroppedFiles(
 
   if (missingAbs.length === 0) return;
 
+  // Parse all missing files via WASM first so we can distinguish real native
+  // extractor failures (WASM finds symbols but native didn't) from files the
+  // Rust engine legitimately skipped (gitignored artifacts, empty declaration
+  // files, etc. where WASM also produces 0 symbols). Both categories are
+  // backfilled — only the former triggers a WARN (#1566).
+  const wasmResults = await parseFilesWasmForBackfill(missingAbs, ctx.rootDir);
+
+  // Build two sets from wasmResults:
+  //   wasmParsedFiles  — rel-paths present in wasmResults (WASM succeeded, even 0 symbols)
+  //   wasmFoundSymbols — subset where WASM found ≥1 symbol
+  // Files absent from wasmParsedFiles were skipped by WASM entirely (extension
+  // not in _extToLang, wasmExtractSymbols returned null, or a read error).
+  // Those files do NOT end up in the batchInsertNodes loop below.
+  const wasmParsedFiles = new Set<string>();
+  const wasmFoundSymbols = new Set<string>();
+  for (const [relPath, symbols] of wasmResults) {
+    wasmParsedFiles.add(relPath);
+    if ((symbols.definitions?.length ?? 0) > 0 || (symbols.exports?.length ?? 0) > 0) {
+      wasmFoundSymbols.add(relPath);
+    }
+  }
+
   // Classify drops so users see per-extension reasons instead of just a count
   // (#1011). `unsupported-by-native` is a legitimate parser limit (no Rust
   // extractor); `native-extractor-failure` indicates a real native bug since
-  // the language IS supported by the addon yet the file was dropped anyway.
+  // the language IS supported by the addon yet WASM found symbols the native
+  // engine should have extracted. Files where both engines produce 0 symbols
+  // are legitimately empty (e.g. gitignored napi-generated declaration stubs)
+  // and logged at debug level only.
   const { byReason, totals } = classifyNativeDrops(missingRel);
   if (totals['unsupported-by-native'] > 0) {
     const buckets = byReason['unsupported-by-native'];
@@ -1242,12 +1267,54 @@ async function backfillNativeDroppedFiles(
     );
   }
   if (totals['native-extractor-failure'] > 0) {
-    const buckets = byReason['native-extractor-failure'];
-    warn(
-      `Native orchestrator dropped ${totals['native-extractor-failure']} file(s) across ${buckets.size} extension(s) in natively-supported languages — likely a Rust extractor bug. Backfilling via WASM:${formatDropExtensionSummary(buckets)}`,
-    );
+    // Three-way split of native-extractor-failure files:
+    //   realFailureBuckets  — WASM found symbols → real Rust extractor bug (WARN)
+    //   emptyFileBuckets    — WASM parsed but found 0 symbols → gitignored/empty (debug)
+    //                         These DO receive a file-node insert in the loop below.
+    //   wasmSkipBuckets     — WASM skipped entirely (ext unknown or parse error) →
+    //                         no file-node insert, and no WARN (debug only, distinct
+    //                         message to avoid overstating backfill coverage).
+    const realFailurePaths = byReason['native-extractor-failure'];
+    const realFailureBuckets = new Map<string, string[]>();
+    const emptyFileBuckets = new Map<string, string[]>();
+    const wasmSkipBuckets = new Map<string, string[]>();
+    for (const [ext, paths] of realFailurePaths) {
+      for (const relPath of paths) {
+        let bucket: Map<string, string[]>;
+        if (wasmFoundSymbols.has(relPath)) {
+          bucket = realFailureBuckets;
+        } else if (wasmParsedFiles.has(relPath)) {
+          bucket = emptyFileBuckets;
+        } else {
+          bucket = wasmSkipBuckets;
+        }
+        let list = bucket.get(ext);
+        if (!list) {
+          list = [];
+          bucket.set(ext, list);
+        }
+        list.push(relPath);
+      }
+    }
+    if (realFailureBuckets.size > 0) {
+      const realCount = [...realFailureBuckets.values()].reduce((s, a) => s + a.length, 0);
+      warn(
+        `Native orchestrator dropped ${realCount} file(s) across ${realFailureBuckets.size} extension(s) in natively-supported languages — likely a Rust extractor bug. Backfilling via WASM:${formatDropExtensionSummary(realFailureBuckets)}`,
+      );
+    }
+    if (emptyFileBuckets.size > 0) {
+      const emptyCount = [...emptyFileBuckets.values()].reduce((s, a) => s + a.length, 0);
+      debug(
+        `Native orchestrator skipped ${emptyCount} file(s) in natively-supported languages that also produced 0 symbols via WASM (likely gitignored or empty); backfilling file nodes:${formatDropExtensionSummary(emptyFileBuckets)}`,
+      );
+    }
+    if (wasmSkipBuckets.size > 0) {
+      const skipCount = [...wasmSkipBuckets.values()].reduce((s, a) => s + a.length, 0);
+      debug(
+        `Native orchestrator skipped ${skipCount} file(s) in natively-supported languages that WASM also could not parse (unregistered extension or parse error); no file-node inserted:${formatDropExtensionSummary(wasmSkipBuckets)}`,
+      );
+    }
   }
-  const wasmResults = await parseFilesWasmForBackfill(missingAbs, ctx.rootDir);
 
   const rows: unknown[][] = [];
   const exportKeys: unknown[][] = [];
