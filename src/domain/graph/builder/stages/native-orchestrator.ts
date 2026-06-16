@@ -1274,11 +1274,11 @@ async function backfillNativeDroppedFiles(
     //   wasmSkipBuckets     — WASM skipped entirely (ext unknown or parse error) →
     //                         no file-node insert, and no WARN (debug only, distinct
     //                         message to avoid overstating backfill coverage).
-    const realFailurePaths = byReason['native-extractor-failure'];
+    const allFailurePaths = byReason['native-extractor-failure'];
     const realFailureBuckets = new Map<string, string[]>();
     const emptyFileBuckets = new Map<string, string[]>();
     const wasmSkipBuckets = new Map<string, string[]>();
-    for (const [ext, paths] of realFailurePaths) {
+    for (const [ext, paths] of allFailurePaths) {
       for (const relPath of paths) {
         let bucket: Map<string, string[]>;
         if (wasmFoundSymbols.has(relPath)) {
