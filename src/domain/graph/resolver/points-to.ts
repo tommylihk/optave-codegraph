@@ -237,7 +237,7 @@ function buildObjectRestConstraints(
  *
  * Mutates `pts` (seeds array-element and object-rest entries) and appends to `constraints`.
  */
-function buildReturnTypeMap(
+function appendAdvancedConstraints(
   pts: PointsToMap,
   constraints: Array<{ lhs: string; rhsKey: string }>,
   definitionNames: ReadonlySet<string>,
@@ -341,7 +341,7 @@ export function buildPointsToMap(
     importedNames,
   );
 
-  buildReturnTypeMap(
+  appendAdvancedConstraints(
     pts,
     constraints,
     definitionNames,
