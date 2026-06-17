@@ -606,10 +606,37 @@ while iteration < maxIterations:
         else:
             Run: <testCmd> 2>&1
             if tests fail:
-                Print: "CRITICAL: Test suite fails after forge phase <nextPhase>. Stopping pipeline."
+                Print: "WARNING: Test suite has failures after forge phase <nextPhase>. Auto-spawning regression-fix agent."
+                Print: "Failing tests: <list of failing test files>"
                 Print: "Commits from this phase: git log --oneline <headBefore>..<headAfter>"
-                Print: "Consider reverting: git revert <headBefore>..<headAfter>"
-                Stop.
+
+                # Run Pre-Agent Gate (G1-G4) and back up state
+                # Then dispatch fix agent:
+                Agent → "Investigate and fix test regressions introduced by the last forge phase.
+                         Commits in scope: git log --oneline <headBefore>..<headAfter>
+                         Failing tests: <list>
+                         
+                         Steps:
+                         1. Read the failing tests to understand what they expect
+                         2. Identify which committed change broke them (git diff <headBefore>..<headAfter>)
+                         3. Fix the root cause — prefer targeted fixes over reverts
+                         4. If Rust source changed: rebuild the native addon before running tests
+                            npx napi build --platform --release --manifest-path crates/codegraph-core/Cargo.toml --output-dir .
+                            codesign --sign - --force node_modules/@optave/codegraph-darwin-arm64/codegraph-core.node
+                         5. Verify with: npx vitest run --config vitest.config.worktree.ts
+                         6. Commit fixes with: 'fix: correct regressions from forge phase <N>'
+                         7. Do NOT stage: package-lock.json, vitest.config.worktree.ts, tests/benchmarks/resolution/fixtures/python/__pycache__/
+                         
+                         Run all commands INLINE (not in background)."
+                
+                # After fix agent returns, re-run tests:
+                Run: <testCmd> 2>&1
+                if tests still fail:
+                    Print: "CRITICAL: Regression-fix agent could not resolve test failures after forge phase <nextPhase>. Manual intervention required."
+                    Print: "Consider reverting: git revert <headBefore>..<headAfter>"
+                    Stop.
+                else:
+                    Print: "V13: Regressions resolved by fix agent. Continuing pipeline."
 ```
 
 ### 4c. Post-loop validation
@@ -714,9 +741,37 @@ while iteration < maxIterations:
         if testCmd != "NO_TEST_SCRIPT":
             Run: <testCmd> 2>&1
             if tests fail:
-                Print: "CRITICAL: Test suite fails after grind phase <nextPhase>. Stopping pipeline."
+                Print: "WARNING: Test suite has failures after grind phase <nextPhase>. Auto-spawning regression-fix agent."
+                Print: "Failing tests: <list of failing test files>"
                 Print: "Commits from this phase: git log --oneline <headBefore>..<headAfter>"
-                Stop.
+
+                # Run Pre-Agent Gate (G1-G4) and back up state
+                # Then dispatch fix agent:
+                Agent → "Investigate and fix test regressions introduced by the last grind phase.
+                         Commits in scope: git log --oneline <headBefore>..<headAfter>
+                         Failing tests: <list>
+                         
+                         Steps:
+                         1. Read the failing tests to understand what they expect
+                         2. Identify which committed change broke them (git diff <headBefore>..<headAfter>)
+                         3. Fix the root cause — prefer targeted fixes over reverts
+                         4. If Rust source changed: rebuild the native addon before running tests
+                            npx napi build --platform --release --manifest-path crates/codegraph-core/Cargo.toml --output-dir .
+                            codesign --sign - --force node_modules/@optave/codegraph-darwin-arm64/codegraph-core.node
+                         5. Verify with: npx vitest run --config vitest.config.worktree.ts
+                         6. Commit fixes with: 'fix: correct regressions from grind phase <N>'
+                         7. Do NOT stage: package-lock.json, vitest.config.worktree.ts, tests/benchmarks/resolution/fixtures/python/__pycache__/
+                         
+                         Run all commands INLINE (not in background)."
+                
+                # After fix agent returns, re-run tests:
+                Run: <testCmd> 2>&1
+                if tests still fail:
+                    Print: "CRITICAL: Regression-fix agent could not resolve test failures after grind phase <nextPhase>. Manual intervention required."
+                    Print: "Consider reverting: git revert <headBefore>..<headAfter>"
+                    Stop.
+                else:
+                    Print: "V17: Regressions resolved by fix agent. Continuing pipeline."
 ```
 
 ### 4.5c. Post-loop validation
@@ -834,7 +889,7 @@ Record `phaseTimestamps.close.completedAt`.
 - **State file corrupt (JSON parse error):** Attempt restore from `.bak`. If no backup → stop: "State file corrupted. Run `/titan-reset` and start over."
 - **NDJSON corrupt lines:** Warn but continue — partial results are better than none. The corrupt lines are logged so the user knows which targets to re-audit.
 - **Merge conflict detected by pre-agent gate:** Stop immediately with the conflicting files listed.
-- **Tests fail after forge phase:** Stop immediately. Print the failing phase's commits so the user can revert.
+- **Tests fail after forge/grind phase:** Auto-spawn a regression-fix agent. If the fix agent resolves the failures, continue the pipeline. If it cannot, stop and print the failing commits so the user can revert.
 - **Parity audit fails on drift introduced by this run:** Stop before CLOSE. Retry with `/titan-run --start-from parity` after fixing or reverting.
 - **Validation failure (any V-check marked FAILED):** Stop with details. Warn-level V-checks are logged but don't stop the pipeline.
 
