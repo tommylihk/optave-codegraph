@@ -7,11 +7,7 @@
 
 import type { PaginatedItems, PaginationMeta, PaginationOpts } from '../types.js';
 
-export type {
-  PaginatedItems as PaginatedResult,
-  PaginationMeta,
-  PaginationOpts as PaginateOpts,
-} from '../types.js';
+export type { PaginatedItems as PaginatedResult, PaginationMeta, PaginationOpts as PaginateOpts };
 
 /** Default limits applied by MCP tool handlers (not by the programmatic API). */
 export const MCP_DEFAULTS: Record<string, number> = {
