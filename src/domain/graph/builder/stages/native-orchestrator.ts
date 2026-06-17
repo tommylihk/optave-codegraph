@@ -390,7 +390,7 @@ async function runPostNativeAnalysis(
 }
 
 /**
- * Phase 8.5: CHA expansion post-pass for the native orchestrator path.
+ * Phase 8.6: CHA expansion post-pass for the native orchestrator path.
  *
  * The Rust build pipeline resolves typed receiver calls (e.g. `worker.doWork()`
  * where `worker: IWorker`) to the interface method declaration only.  This
@@ -572,25 +572,37 @@ function runPostNativeCha(
   // incremental role reclassification; confidence uses CHA_TYPED_DISPATCH_CONFIDENCE matching runChaPostPass.
   // When scopeToChangedFiles is true, restrict to call sites in the changed files
   // (safe because no hierarchy or RTA evidence changed outside those files).
-  let callToMethods: Array<{ source_id: number; method_name: string; caller_file: string | null }>;
+  let callToMethods: Array<{
+    source_id: number;
+    caller_name: string;
+    method_name: string;
+    caller_file: string | null;
+  }>;
   if (scopeToChangedFiles && changedFiles && changedFiles.length > 0) {
     const CHUNK_SIZE = 500;
-    const rows: Array<{ source_id: number; method_name: string; caller_file: string | null }> = [];
+    const rows: Array<{
+      source_id: number;
+      caller_name: string;
+      method_name: string;
+      caller_file: string | null;
+    }> = [];
     for (let i = 0; i < changedFiles.length; i += CHUNK_SIZE) {
       const chunk = changedFiles.slice(i, i + CHUNK_SIZE);
       const ph = chunk.map(() => '?').join(',');
       const chunkRows = db
         .prepare(
-          `SELECT e.source_id, tgt.name AS method_name, src.file AS caller_file
+          `SELECT e.source_id, src.name AS caller_name, tgt.name AS method_name, src.file AS caller_file
            FROM edges e
            JOIN nodes tgt ON e.target_id = tgt.id
            JOIN nodes src ON e.source_id = src.id
            WHERE e.kind = 'calls' AND tgt.kind = 'method'
            AND INSTR(tgt.name, '.') > 0
+           AND (e.technique IS NULL OR e.technique != 'cha-expanded')
            AND src.file IN (${ph})`,
         )
         .all(...chunk) as Array<{
         source_id: number;
+        caller_name: string;
         method_name: string;
         caller_file: string | null;
       }>;
@@ -600,14 +612,20 @@ function runPostNativeCha(
   } else {
     callToMethods = db
       .prepare(`
-        SELECT e.source_id, tgt.name AS method_name, src.file AS caller_file
+        SELECT e.source_id, src.name AS caller_name, tgt.name AS method_name, src.file AS caller_file
         FROM edges e
         JOIN nodes tgt ON e.target_id = tgt.id
         JOIN nodes src ON e.source_id = src.id
         WHERE e.kind = 'calls' AND tgt.kind = 'method'
         AND INSTR(tgt.name, '.') > 0
+        AND (e.technique IS NULL OR e.technique != 'cha-expanded')
       `)
-      .all() as Array<{ source_id: number; method_name: string; caller_file: string | null }>;
+      .all() as Array<{
+      source_id: number;
+      caller_name: string;
+      method_name: string;
+      caller_file: string | null;
+    }>;
   }
 
   // Seed seen-pairs only from the source_ids we'll be expanding — avoids loading every
@@ -667,7 +685,7 @@ function runPostNativeCha(
             if (seen.has(key)) continue;
             seen.add(key);
             const conf = CHA_TYPED_DISPATCH_CONFIDENCE;
-            newEdges.push([source_id, methodNode.id, 'calls', conf, 0, 'cha']);
+            newEdges.push([source_id, methodNode.id, 'calls', conf, 0, 'cha-expanded']);
             newEdgeCount++;
             if (caller_file) affectedFiles.add(caller_file);
             if (methodNode.method_file) affectedFiles.add(methodNode.method_file);
@@ -701,8 +719,13 @@ const THIS_DISPATCH_EXTS = new Set(['.js', '.ts', '.tsx', '.jsx', '.mjs', '.cjs'
  * `this`/`super` receivers, then resolves them through the class hierarchy stored
  * in DB `extends` edges — mirroring what `buildChaPostPass` does on the WASM path.
  *
- * Only runs when `extends` edges exist in the DB; if there is no inheritance
- * hierarchy there is nothing to resolve via `this`/`super` dispatch.
+ * Also handles function-as-object-property methods (`f.h = function() { this.g() }`):
+ * these use `this` to reference sibling properties on the same object (`f`), so
+ * `resolveThisDispatch` resolves them by treating the dot-prefix of the caller name
+ * (`f` from `f.h`) as the class and looking up `f.g` directly — no `extends` edge needed.
+ *
+ * Runs when either `extends` edges exist (class inheritance) OR dot-named `method`
+ * nodes exist (func-prop assignments); skips only when neither is present.
  */
 async function runPostNativeThisDispatch(
   db: BetterSqlite3Database,
@@ -715,26 +738,39 @@ async function runPostNativeThisDispatch(
   // Files containing endpoints of newly inserted edges — lets the caller scope
   // role re-classification to the nodes whose fan-in/out actually changed.
   const affectedFiles = new Set<string>();
-  // Fast guard: need at least one extends edge for this/super to have meaning
-  const hasExtends = db.prepare(`SELECT 1 FROM edges WHERE kind = 'extends' LIMIT 1`).get();
-  if (!hasExtends) return { elapsedMs: 0, targetIds, affectedFiles };
 
-  // Build parents map: child class → direct parent class (from `extends` edges)
-  const parentRows = db
-    .prepare(`
-      SELECT src.name AS child_name, tgt.name AS parent_name
-      FROM edges e
-      JOIN nodes src ON e.source_id = src.id
-      JOIN nodes tgt ON e.target_id = tgt.id
-      WHERE e.kind = 'extends'
-    `)
-    .all() as Array<{ child_name: string; parent_name: string }>;
+  // Fast guard: need at least one extends edge (class inheritance) OR a dot-named
+  // method node (func-prop assignment: `f.h = function() { this.g() }`) for
+  // this/super dispatch to produce any edges.
+  const hasExtends = db.prepare(`SELECT 1 FROM edges WHERE kind = 'extends' LIMIT 1`).get();
+  const hasFuncPropMethod = db
+    .prepare(`SELECT 1 FROM nodes WHERE kind = 'method' AND INSTR(name, '.') > 0 LIMIT 1`)
+    .get();
+  if (!hasExtends && !hasFuncPropMethod) return { elapsedMs: 0, targetIds, affectedFiles };
+
+  // Build parents map: child class → direct parent class (from `extends` edges).
+  // May be empty when only func-prop methods exist (no class inheritance) —
+  // resolveThisDispatch handles that case via direct class-prefix lookup.
+  const parentRows = hasExtends
+    ? (db
+        .prepare(`
+          SELECT src.name AS child_name, tgt.name AS parent_name
+          FROM edges e
+          JOIN nodes src ON e.source_id = src.id
+          JOIN nodes tgt ON e.target_id = tgt.id
+          WHERE e.kind = 'extends'
+        `)
+        .all() as Array<{ child_name: string; parent_name: string }>)
+    : [];
 
   const parents = new Map<string, string>();
   for (const row of parentRows) {
     if (!parents.has(row.child_name)) parents.set(row.child_name, row.parent_name);
   }
-  if (parents.size === 0) return { elapsedMs: 0, targetIds, affectedFiles };
+  // Note: parents may be empty when hasFuncPropMethod but !hasExtends — that is
+  // intentional. resolveThisDispatch still resolves `this.g()` inside `f.h` by
+  // treating `f` (the dot-prefix of callerName `f.h`) as the class and looking
+  // up `f.g` directly via lookup.byName(), without traversing the parents chain.
 
   const chaCtx: ChaContext = {
     implementors: new Map(), // not needed for this/super resolution
@@ -747,13 +783,11 @@ async function runPostNativeThisDispatch(
   // On a full build we do NOT re-parse every JS/TS file — that would WASM-parse
   // the entire project on top of the native pass, causing a massive regression
   // (measured: +358% ms/file on codegraph itself). Instead we restrict to files
-  // that are part of the class inheritance hierarchy: both subclass files (which
-  // contain `super.X()` calls dispatching to a parent) and parent-class files
-  // (whose method bodies contain `this.X()` calls that CHA must resolve). Any
-  // file not in the hierarchy has no `extends` relationship, so `this`/`super`
-  // calls in it either resolve locally (same-class dispatch, already handled by
-  // the direct-call edge) or have no class context — and will be skipped by
-  // `resolveThisDispatch` anyway.
+  // that are part of the class inheritance hierarchy (both subclass files with
+  // `super.X()` calls and parent-class files with `this.X()` calls) OR that
+  // contain dot-named method nodes (func-prop assignments whose bodies may call
+  // `this.sibling()`). Any file not in either set has no class or object context
+  // where `this`/`super` dispatch would produce new edges.
   let relFiles: string[];
   if (isFullBuild || !changedFiles) {
     const rows = db
@@ -768,6 +802,21 @@ async function runPostNativeThisDispatch(
           FROM edges e
           JOIN nodes tgt ON e.target_id = tgt.id
           WHERE e.kind = 'extends' AND tgt.file IS NOT NULL
+          UNION
+          -- Files with func-prop method definitions (e.g. f.h = function(){this.g()}).
+          -- Only include files where the method's owner prefix is NOT a known class name —
+          -- this keeps the re-parse set small (func-prop files only, not all class-method files).
+          -- AND name IS NOT NULL guards the NOT IN sub-select: if any class node had a NULL
+          -- name the entire NOT IN clause would silently return no rows (SQL NULL semantics).
+          SELECT n.file AS file
+          FROM nodes n
+          WHERE n.kind = 'method'
+          AND INSTR(n.name, '.') > 0
+          AND n.file IS NOT NULL
+          AND SUBSTR(n.name, 1, INSTR(n.name, '.') - 1) NOT IN (
+            SELECT name FROM nodes WHERE kind IN ('class', 'struct', 'interface', 'type')
+            AND name IS NOT NULL
+          )
         )
       `)
       .all() as Array<{ file: string }>;
@@ -907,6 +956,7 @@ async function runPostNativeThisDispatch(
         call.receiver as 'this' | 'super',
         chaCtx,
         lookup,
+        relPath,
       );
 
       for (const t of targets) {
@@ -916,7 +966,10 @@ async function runPostNativeThisDispatch(
         seen.add(key);
         const conf = computeConfidence(relPath, t.file, null) - CHA_DISPATCH_PENALTY;
         if (conf <= 0) continue;
-        newEdges.push([callerRow.id, t.id, 'calls', conf, 0, 'cha']);
+        // Tag super-dispatch edges distinctly so runPostNativeCha can exclude them
+        // from further CHA expansion (super calls are not virtual dispatch).
+        const technique = call.receiver === 'super' ? 'super-dispatch' : 'cha';
+        newEdges.push([callerRow.id, t.id, 'calls', conf, 0, technique]);
         targetIds.add(t.id);
         affectedFiles.add(relPath);
         if (t.file) affectedFiles.add(t.file);
@@ -1177,10 +1230,35 @@ async function backfillNativeDroppedFiles(
 
   if (missingAbs.length === 0) return;
 
+  // Parse all missing files via WASM first so we can distinguish real native
+  // extractor failures (WASM finds symbols but native didn't) from files the
+  // Rust engine legitimately skipped (gitignored artifacts, empty declaration
+  // files, etc. where WASM also produces 0 symbols). Both categories are
+  // backfilled — only the former triggers a WARN (#1566).
+  const wasmResults = await parseFilesWasmForBackfill(missingAbs, ctx.rootDir);
+
+  // Build two sets from wasmResults:
+  //   wasmParsedFiles  — rel-paths present in wasmResults (WASM succeeded, even 0 symbols)
+  //   wasmFoundSymbols — subset where WASM found ≥1 symbol
+  // Files absent from wasmParsedFiles were skipped by WASM entirely (extension
+  // not in _extToLang, wasmExtractSymbols returned null, or a read error).
+  // Those files do NOT end up in the batchInsertNodes loop below.
+  const wasmParsedFiles = new Set<string>();
+  const wasmFoundSymbols = new Set<string>();
+  for (const [relPath, symbols] of wasmResults) {
+    wasmParsedFiles.add(relPath);
+    if ((symbols.definitions?.length ?? 0) > 0 || (symbols.exports?.length ?? 0) > 0) {
+      wasmFoundSymbols.add(relPath);
+    }
+  }
+
   // Classify drops so users see per-extension reasons instead of just a count
   // (#1011). `unsupported-by-native` is a legitimate parser limit (no Rust
   // extractor); `native-extractor-failure` indicates a real native bug since
-  // the language IS supported by the addon yet the file was dropped anyway.
+  // the language IS supported by the addon yet WASM found symbols the native
+  // engine should have extracted. Files where both engines produce 0 symbols
+  // are legitimately empty (e.g. gitignored napi-generated declaration stubs)
+  // and logged at debug level only.
   const { byReason, totals } = classifyNativeDrops(missingRel);
   if (totals['unsupported-by-native'] > 0) {
     const buckets = byReason['unsupported-by-native'];
@@ -1189,12 +1267,54 @@ async function backfillNativeDroppedFiles(
     );
   }
   if (totals['native-extractor-failure'] > 0) {
-    const buckets = byReason['native-extractor-failure'];
-    warn(
-      `Native orchestrator dropped ${totals['native-extractor-failure']} file(s) across ${buckets.size} extension(s) in natively-supported languages — likely a Rust extractor bug. Backfilling via WASM:${formatDropExtensionSummary(buckets)}`,
-    );
+    // Three-way split of native-extractor-failure files:
+    //   realFailureBuckets  — WASM found symbols → real Rust extractor bug (WARN)
+    //   emptyFileBuckets    — WASM parsed but found 0 symbols → gitignored/empty (debug)
+    //                         These DO receive a file-node insert in the loop below.
+    //   wasmSkipBuckets     — WASM skipped entirely (ext unknown or parse error) →
+    //                         no file-node insert, and no WARN (debug only, distinct
+    //                         message to avoid overstating backfill coverage).
+    const allFailurePaths = byReason['native-extractor-failure'];
+    const realFailureBuckets = new Map<string, string[]>();
+    const emptyFileBuckets = new Map<string, string[]>();
+    const wasmSkipBuckets = new Map<string, string[]>();
+    for (const [ext, paths] of allFailurePaths) {
+      for (const relPath of paths) {
+        let bucket: Map<string, string[]>;
+        if (wasmFoundSymbols.has(relPath)) {
+          bucket = realFailureBuckets;
+        } else if (wasmParsedFiles.has(relPath)) {
+          bucket = emptyFileBuckets;
+        } else {
+          bucket = wasmSkipBuckets;
+        }
+        let list = bucket.get(ext);
+        if (!list) {
+          list = [];
+          bucket.set(ext, list);
+        }
+        list.push(relPath);
+      }
+    }
+    if (realFailureBuckets.size > 0) {
+      const realCount = [...realFailureBuckets.values()].reduce((s, a) => s + a.length, 0);
+      warn(
+        `Native orchestrator dropped ${realCount} file(s) across ${realFailureBuckets.size} extension(s) in natively-supported languages — likely a Rust extractor bug. Backfilling via WASM:${formatDropExtensionSummary(realFailureBuckets)}`,
+      );
+    }
+    if (emptyFileBuckets.size > 0) {
+      const emptyCount = [...emptyFileBuckets.values()].reduce((s, a) => s + a.length, 0);
+      debug(
+        `Native orchestrator skipped ${emptyCount} file(s) in natively-supported languages that also produced 0 symbols via WASM (likely gitignored or empty); backfilling file nodes:${formatDropExtensionSummary(emptyFileBuckets)}`,
+      );
+    }
+    if (wasmSkipBuckets.size > 0) {
+      const skipCount = [...wasmSkipBuckets.values()].reduce((s, a) => s + a.length, 0);
+      debug(
+        `Native orchestrator skipped ${skipCount} file(s) in natively-supported languages that WASM also could not parse (unregistered extension or parse error); no file-node inserted:${formatDropExtensionSummary(wasmSkipBuckets)}`,
+      );
+    }
   }
-  const wasmResults = await parseFilesWasmForBackfill(missingAbs, ctx.rootDir);
 
   const rows: unknown[][] = [];
   const exportKeys: unknown[][] = [];
@@ -1547,9 +1667,30 @@ export async function tryNativeOrchestrator(
   }
   const gapDetectMs = performance.now() - gapDetectStart;
 
-  // Phase 8.5: expand CHA call edges (interface dispatch → concrete implementations).
+  // Phase 8.5: this/super dispatch — hybrid WASM re-parse to resolve call sites
+  // whose raw receiver info the Rust pipeline does not persist to DB.
+  // Runs BEFORE the CHA expansion pass so that super.method() → Parent.method edges
+  // (technique='cha') are in the DB when runPostNativeCha expands them to sibling
+  // class overrides (e.g. PostMixin.m → B.m when PostMixin and B both extend A).
+  const {
+    elapsedMs: thisDispatchMs,
+    targetIds: thisDispatchTargetIds,
+    affectedFiles: thisDispatchAffectedFiles,
+  } = await runPostNativeThisDispatch(
+    ctx.db as unknown as BetterSqlite3Database,
+    ctx.rootDir,
+    result.changedFiles,
+    !!result.isFullBuild,
+  );
+
+  // Phase 8.6: expand CHA call edges (interface dispatch → concrete implementations).
   // Returns the affected files so role re-classification below can be scoped to
   // the nodes whose fan-in/out actually changed.
+  //
+  // Runs AFTER this/super dispatch so super.method() edges are already in the DB.
+  // The 'cha-expanded' technique tag on this pass's own output prevents re-expansion
+  // of those edges in subsequent incremental builds, while 'cha'-tagged edges from
+  // this/super dispatch remain eligible for expansion here.
   //
   // Function-as-object-property methods (`fn.method = function() {}`) are extracted
   // natively by the Rust engine (#1432) and resolved in-build by its edge builder, so
@@ -1561,19 +1702,6 @@ export async function tryNativeOrchestrator(
     result.isFullBuild ? null : (result.changedFiles ?? null),
   );
   const chaMs = performance.now() - chaStart;
-
-  // Phase 8.5: this/super dispatch — hybrid WASM re-parse to resolve call sites
-  // whose raw receiver info the Rust pipeline does not persist to DB.
-  const {
-    elapsedMs: thisDispatchMs,
-    targetIds: thisDispatchTargetIds,
-    affectedFiles: thisDispatchAffectedFiles,
-  } = await runPostNativeThisDispatch(
-    ctx.db as unknown as BetterSqlite3Database,
-    ctx.rootDir,
-    result.changedFiles,
-    !!result.isFullBuild,
-  );
 
   // Role re-classification after JS edge-writing post-passes.
   // The Rust orchestrator classifies roles before these post-passes (CHA,
