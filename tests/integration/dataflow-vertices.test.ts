@@ -270,11 +270,62 @@ describe('P1: dataflow_vertices', () => {
     expect(rows[0]!.param_index).toBe(0);
   });
 
-  test('dataflow_fn view is empty (no inter-function vertex edges yet)', () => {
+  test('P2: dataflow_fn view shows arg_in inter-procedural edge (processData → helper)', () => {
     const db = openDb();
-    const rows = db.prepare('SELECT * FROM dataflow_fn').all();
+    const rows = db
+      .prepare(
+        `SELECT dfn.*, sn.name AS src_name, tn.name AS tgt_name
+         FROM dataflow_fn dfn
+         JOIN nodes sn ON sn.id = dfn.source_id
+         JOIN nodes tn ON tn.id = dfn.target_id`,
+      )
+      .all() as any[];
     db.close();
-    // No vertex-linked inter edges yet (those come in P2 stitching)
-    expect(rows).toHaveLength(0);
+    // P2 stitch created arg_in: processData.param[input] → helper.param[x]
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.src_name).toBe('processData');
+    expect(rows[0]!.tgt_name).toBe('helper');
+    expect(rows[0]!.kind).toBe('arg_in');
+  });
+
+  test('P2: arg_in edge has scope=inter and correct vertex kinds', () => {
+    const db = openDb();
+    const rows = db
+      .prepare(
+        `SELECT d.kind, d.scope, sv.kind AS sv_kind, sv.name AS sv_name,
+                tv.kind AS tv_kind, tv.name AS tv_name
+         FROM dataflow d
+         JOIN dataflow_vertices sv ON sv.id = d.source_vertex
+         JOIN dataflow_vertices tv ON tv.id = d.target_vertex
+         WHERE d.kind = 'arg_in' AND d.scope = 'inter'`,
+      )
+      .all() as any[];
+    db.close();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.sv_kind).toBe('param');
+    expect(rows[0]!.sv_name).toBe('input');
+    expect(rows[0]!.tv_kind).toBe('param');
+    expect(rows[0]!.tv_name).toBe('x');
+  });
+
+  test('P2: summary — helper.param[y] flows_to_return=1, helper.param[x] flows_to_return=0', () => {
+    const db = openDb();
+    const rows = db
+      .prepare(
+        `SELECT ds.param_index, ds.flows_to_return, ds.is_mutated
+         FROM dataflow_summary ds
+         JOIN nodes n ON n.id = ds.func_id
+         WHERE n.name = 'helper'
+         ORDER BY ds.param_index`,
+      )
+      .all() as any[];
+    db.close();
+    // param 0 = x — not in return expression (z + y), so flows_to_return=0
+    // param 1 = y — in return expression, so flows_to_return=1
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.param_index).toBe(0);
+    expect(rows[0]!.flows_to_return).toBe(0);
+    expect(rows[1]!.param_index).toBe(1);
+    expect(rows[1]!.flows_to_return).toBe(1);
   });
 });

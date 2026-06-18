@@ -206,7 +206,46 @@ interface VisitorReturn {
 interface VisitorAssignment {
   varName: string;
   callerFunc: string;
+  sourceCallName: string;
   line: number;
+}
+
+interface VisitorArgFlow {
+  callerFunc: string;
+  calleeName: string;
+  argIndex: number;
+  argName: string;
+  binding: { type: string; index?: number };
+  confidence: number;
+  expression: string;
+  line: number;
+}
+
+interface VisitorMutation {
+  funcName: string;
+  binding: { type: string; index?: number };
+}
+
+// ── P2: interprocedural stitch data collected during per-file processing ──
+
+/** A resolved argFlow candidate for the inter-procedural stitch post-pass. */
+interface StitchCandidate {
+  callerFuncId: number;
+  calleeFuncId: number;
+  argIndex: number;
+  bindingType: string;
+  bindingIndex?: number;
+  argName: string;
+  expression: string;
+  line: number;
+  confidence: number;
+}
+
+/** An assignment that captures a function's return value into a local. */
+interface ReturnCapture {
+  callerFuncId: number;
+  calleeFuncId: number;
+  varName: string;
 }
 
 function insertDataflowEdges(
@@ -291,37 +330,40 @@ function prepareVertexStmts(db: BetterSqlite3Database): {
 }
 
 /**
- * Build dataflow_vertices and intra def_use edges for one file.
+ * Build dataflow_vertices, intra def_use edges, and summaries for one file.
  * Called alongside insertDataflowEdges in the same transaction.
  *
- * Creates:
- *  - 'param'  vertex per function parameter
- *  - 'return' vertex per function that has at least one return statement
- *  - 'local'  vertex per variable assigned from a function call return
- *  - 'def_use' intra edges from param/local → return when the name
- *    appears in a return expression's referenced identifiers
+ * Returns stitch candidates and return captures for the P2 inter-procedural
+ * post-pass (run after all files are processed).
  */
 function buildDataflowVerticesAndEdges(
+  db: BetterSqlite3Database,
   vstmts: ReturnType<typeof prepareVertexStmts>,
   data: DataflowResult,
   resolveNode: (name: string) => { id: number } | null,
-): void {
-  if (!vstmts.available) return;
+): { candidates: StitchCandidate[]; captures: ReturnCapture[] } {
+  const empty: { candidates: StitchCandidate[]; captures: ReturnCapture[] } = {
+    candidates: [],
+    captures: [],
+  };
+  if (!vstmts.available) return empty;
 
   const params = data.parameters as unknown as VisitorParam[];
   const returns = data.returns as unknown as VisitorReturn[];
   const assignments = data.assignments as unknown as VisitorAssignment[];
+  const argFlows = data.argFlows as unknown as VisitorArgFlow[];
+  const mutations = data.mutations as unknown as VisitorMutation[];
 
   // 1. param vertices
   const paramVertexIds = new Map<string, number>(); // "funcName:paramName" → vertex id
+  const paramIndexByFuncAndIndex = new Map<string, number>(); // "funcId:paramIndex" → vertex id
   for (const p of params) {
     const fn = resolveNode(p.funcName);
     if (!fn) continue;
     const result = vstmts.insertVertex.run(fn.id, 'param', p.paramName, p.paramIndex, p.line, null);
-    paramVertexIds.set(
-      `${p.funcName}:${p.paramName}`,
-      (result as { lastInsertRowid: number }).lastInsertRowid,
-    );
+    const vid = (result as { lastInsertRowid: number }).lastInsertRowid;
+    paramVertexIds.set(`${p.funcName}:${p.paramName}`, vid);
+    paramIndexByFuncAndIndex.set(`${fn.id}:${p.paramIndex}`, vid);
   }
 
   // 2. return vertices (one per function that has a return statement)
@@ -366,6 +408,183 @@ function buildDataflowVerticesAndEdges(
       }
     }
   }
+
+  // 5. summaries: flows_to_return = direct def_use from param to function's return
+  const checkDefUse = db.prepare(
+    `SELECT 1 FROM dataflow WHERE source_vertex = ? AND target_vertex = ? AND kind = 'def_use' LIMIT 1`,
+  );
+  const insertSummary = db.prepare(
+    `INSERT OR REPLACE INTO dataflow_summary (func_id, param_index, flows_to_return, is_mutated) VALUES (?, ?, ?, ?)`,
+  );
+
+  for (const p of params) {
+    const fn = resolveNode(p.funcName);
+    if (!fn) continue;
+    const paramVid = paramVertexIds.get(`${p.funcName}:${p.paramName}`);
+    if (!paramVid) continue;
+    const returnVid = returnVertexIds.get(p.funcName);
+    const flowsToReturn = returnVid ? (checkDefUse.get(paramVid, returnVid) ? 1 : 0) : 0;
+    const isMutated = mutations.some(
+      (m) =>
+        m.funcName === p.funcName &&
+        m.binding?.type === 'param' &&
+        m.binding?.index === p.paramIndex,
+    )
+      ? 1
+      : 0;
+    insertSummary.run(fn.id, p.paramIndex, flowsToReturn, isMutated);
+  }
+
+  // 6. collect stitch candidates for P2 inter-procedural post-pass
+  const candidates: StitchCandidate[] = [];
+  for (const af of argFlows) {
+    const callerFn = resolveNode(af.callerFunc);
+    const calleeFn = resolveNode(af.calleeName);
+    if (!callerFn || !calleeFn) continue;
+    candidates.push({
+      callerFuncId: callerFn.id,
+      calleeFuncId: calleeFn.id,
+      argIndex: af.argIndex,
+      bindingType: af.binding.type,
+      bindingIndex: af.binding.index,
+      argName: af.argName,
+      expression: af.expression,
+      line: af.line,
+      confidence: af.confidence,
+    });
+  }
+
+  // 7. collect return captures (locals that hold a callee's return value)
+  const captures: ReturnCapture[] = [];
+  for (const a of assignments) {
+    const callerFn = resolveNode(a.callerFunc);
+    const calleeFn = resolveNode(a.sourceCallName);
+    if (!callerFn || !calleeFn) continue;
+    captures.push({ callerFuncId: callerFn.id, calleeFuncId: calleeFn.id, varName: a.varName });
+  }
+
+  return { candidates, captures };
+}
+
+// ── P2: interprocedural stitching ─────────────────────────────────────────────
+
+/**
+ * Post-pass: connect arg-flow candidates to vertex-level inter-procedural edges.
+ * Runs after all per-file vertices + summaries have been committed.
+ *
+ * For each resolved argFlow (A calls B with arg x → B.param[j]):
+ *  - Emits 'arg_in' inter edge: A's source vertex → B.param[j] vertex
+ *  - If B's summary shows B.param[j] reaches B's return: emits 'return_out'
+ *    inter edge: B.return → A's capture local (if any)
+ */
+function buildInterproceduralStitch(
+  db: BetterSqlite3Database,
+  candidates: StitchCandidate[],
+  captures: ReturnCapture[],
+): number {
+  if (candidates.length === 0) return 0;
+
+  const getParamVertex = db.prepare(
+    `SELECT id FROM dataflow_vertices WHERE func_id = ? AND kind = 'param' AND param_index = ? LIMIT 1`,
+  );
+  const getLocalVertex = db.prepare(
+    `SELECT id FROM dataflow_vertices WHERE func_id = ? AND kind = 'local' AND name = ? LIMIT 1`,
+  );
+  const getReturnVertex = db.prepare(
+    `SELECT id FROM dataflow_vertices WHERE func_id = ? AND kind = 'return' LIMIT 1`,
+  );
+  const getCallEdge = db.prepare(
+    `SELECT id FROM edges WHERE source_id = ? AND target_id = ? AND kind = 'calls' LIMIT 1`,
+  );
+  const getSummary = db.prepare(
+    `SELECT flows_to_return FROM dataflow_summary WHERE func_id = ? AND param_index = ?`,
+  );
+  const insertInterEdge = db.prepare(
+    `INSERT INTO dataflow
+       (source_id, target_id, kind, source_vertex, target_vertex, scope, call_edge_id, expression, line, confidence)
+     VALUES (?, ?, ?, ?, ?, 'inter', ?, ?, ?, ?)`,
+  );
+
+  // Build capture map: "callerFuncId:calleeFuncId" → varName (first match wins)
+  const captureMap = new Map<string, string>();
+  for (const cap of captures) {
+    const key = `${cap.callerFuncId}:${cap.calleeFuncId}`;
+    if (!captureMap.has(key)) captureMap.set(key, cap.varName);
+  }
+
+  let count = 0;
+  const tx = db.transaction(() => {
+    for (const cand of candidates) {
+      // Resolve call edge for this site
+      const callEdge = getCallEdge.get(cand.callerFuncId, cand.calleeFuncId) as {
+        id: number;
+      } | null;
+      const callEdgeId = callEdge?.id ?? null;
+
+      // Find source vertex x in caller
+      let srcVertexId: number | null = null;
+      if (cand.bindingType === 'param' && cand.bindingIndex != null) {
+        const v = getParamVertex.get(cand.callerFuncId, cand.bindingIndex) as { id: number } | null;
+        srcVertexId = v?.id ?? null;
+      } else if (cand.bindingType === 'local') {
+        const v = getLocalVertex.get(cand.callerFuncId, cand.argName) as { id: number } | null;
+        srcVertexId = v?.id ?? null;
+      }
+
+      if (!srcVertexId) continue;
+
+      // Find callee's param[argIndex] vertex
+      const calleeParam = getParamVertex.get(cand.calleeFuncId, cand.argIndex) as {
+        id: number;
+      } | null;
+      if (!calleeParam) continue;
+
+      // arg_in: A's source → B.param[j]
+      insertInterEdge.run(
+        cand.callerFuncId,
+        cand.calleeFuncId,
+        'arg_in',
+        srcVertexId,
+        calleeParam.id,
+        callEdgeId,
+        cand.expression,
+        cand.line,
+        cand.confidence,
+      );
+      count++;
+
+      // return_out: if B.param[j] reaches B's return, emit B.return → A's capture
+      const summary = getSummary.get(cand.calleeFuncId, cand.argIndex) as {
+        flows_to_return: number;
+      } | null;
+      if (summary?.flows_to_return) {
+        const calleeReturn = getReturnVertex.get(cand.calleeFuncId) as { id: number } | null;
+        if (calleeReturn) {
+          const captureVarName = captureMap.get(`${cand.callerFuncId}:${cand.calleeFuncId}`);
+          const captureVertex = captureVarName
+            ? (getLocalVertex.get(cand.callerFuncId, captureVarName) as { id: number } | null)
+            : null;
+          if (captureVertex) {
+            insertInterEdge.run(
+              cand.calleeFuncId,
+              cand.callerFuncId,
+              'return_out',
+              calleeReturn.id,
+              captureVertex.id,
+              callEdgeId,
+              cand.expression,
+              cand.line,
+              cand.confidence,
+            );
+            count++;
+          }
+        }
+      }
+    }
+  });
+
+  tx();
+  return count;
 }
 
 // ── buildDataflowEdges ──────────────────────────────────────────────────────
@@ -508,6 +727,9 @@ export async function buildDataflowEdges(
   const vstmts = prepareVertexStmts(db);
   let totalEdges = 0;
 
+  const allCandidates: StitchCandidate[] = [];
+  const allCaptures: ReturnCapture[] = [];
+
   const tx = db.transaction(() => {
     for (const [relPath, symbols] of fileSymbols) {
       const ext = path.extname(relPath).toLowerCase();
@@ -518,12 +740,20 @@ export async function buildDataflowEdges(
 
       const resolver = makeNodeResolver(stmts, relPath);
       totalEdges += insertDataflowEdges(insert, data, resolver);
-      buildDataflowVerticesAndEdges(vstmts, data, resolver);
+      const { candidates, captures } = buildDataflowVerticesAndEdges(db, vstmts, data, resolver);
+      allCandidates.push(...candidates);
+      allCaptures.push(...captures);
     }
   });
 
   tx();
-  info(`Dataflow: ${totalEdges} edges inserted`);
+
+  // P2: inter-procedural stitch — runs after all per-file vertices + summaries committed
+  const interCount = vstmts.available
+    ? buildInterproceduralStitch(db, allCandidates, allCaptures)
+    : 0;
+
+  info(`Dataflow: ${totalEdges} fn-level edges, ${interCount} inter-procedural edges inserted`);
 }
 
 // ── Query functions ─────────────────────────────────────────────────────────
