@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
           for attempt in 1 2 3; do
             npm install && break
             if [ "$attempt" -lt 3 ]; then
@@ -118,7 +118,7 @@ jobs:
         shell: bash
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
           for attempt in 1 2 3; do
             npm install && break
             if [ "$attempt" -lt 3 ]; then
@@ -159,7 +159,7 @@ jobs:
         shell: bash
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
           for attempt in 1 2 3; do
             npm install && break
             if [ "$attempt" -lt 3 ]; then
@@ -245,7 +245,7 @@ jobs:
         shell: bash
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
           for attempt in 1 2 3; do
             npm install && break
             if [ "$attempt" -lt 3 ]; then
@@ -393,7 +393,7 @@ jobs:
         shell: bash
         run: |
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://github.com/".insteadOf "git@github.com:"
           for attempt in 1 2 3; do
             npm install && break
             if [ "$attempt" -lt 3 ]; then
