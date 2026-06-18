@@ -580,11 +580,25 @@ interface CallableNodeRow {
   fan_out: number;
 }
 
+/**
+ * Kinds that are consumed via annotations/references rather than calls.
+ * These do not count as "active callables" for the hasActiveFileSiblings heuristic.
+ */
+const ANNOTATION_ONLY_KINDS = new Set([
+  'constant',
+  'struct',
+  'enum',
+  'trait',
+  'type',
+  'interface',
+  'record',
+]);
+
 /** Build the activeFiles set: files with at least one callable connected to the graph. */
 function buildActiveFilesSet(rows: CallableNodeRow[]): Set<string> {
   const activeFiles = new Set<string>();
   for (const r of rows) {
-    if ((r.fan_in > 0 || r.fan_out > 0) && r.kind !== 'constant') {
+    if ((r.fan_in > 0 || r.fan_out > 0) && !ANNOTATION_ONLY_KINDS.has(r.kind)) {
       activeFiles.add(r.file);
     }
   }
@@ -617,7 +631,14 @@ function buildClassifierInput(
     fanOut: r.fan_out,
     isExported: exportedIds.has(r.id),
     productionFanIn: prodFanInMap.get(r.id) || 0,
-    hasActiveFileSiblings: r.kind === 'constant' ? activeFiles.has(r.file) : undefined,
+    // Set hasActiveFileSiblings for annotation-only kinds (constants, type defs)
+    // AND for method/function — the latter two can have fanIn === 0 due to
+    // untraced call-site patterns (interface dispatch, logical-or defaults).
+    // The classifier interprets this field differently per kind (see classifyUnreferencedNode).
+    hasActiveFileSiblings:
+      ANNOTATION_ONLY_KINDS.has(r.kind) || r.kind === 'method' || r.kind === 'function'
+        ? activeFiles.has(r.file)
+        : undefined,
   }));
 }
 
@@ -801,6 +822,20 @@ function classifyNodeRolesFull(db: BetterSqlite3Database, emptySummary: RoleSumm
     .all() as { id: number }[];
   for (const r of reexportExported) exportedIds.add(r.id);
 
+  // Mark symbols with exported=1 as exported — the extractor sets this flag when the
+  // author writes `export interface Foo { }` / `export type Bar = ...` / `export function`.
+  // Cross-file edge inference misses these when the symbol is only used as a type annotation
+  // within the same file (no calls/imports-type edge is produced for same-file type usage).
+  // This fixes false dead-unresolved classification for exported interfaces with no external callers (#1583).
+  const explicitlyExported = db
+    .prepare(
+      `SELECT id FROM nodes
+      WHERE exported = 1
+        AND kind NOT IN ('file', 'directory', 'parameter', 'property')`,
+    )
+    .all() as { id: number }[];
+  for (const r of explicitlyExported) exportedIds.add(r.id);
+
   // Compute production fan-in (excluding callers in test files)
   const prodFanInMap = new Map<number, number>();
   const prodRows = db
@@ -967,6 +1002,21 @@ function classifyNodeRolesIncremental(
     )
     .all(...allAffectedFiles) as { id: number }[];
   for (const r of reexportExported) exportedIds.add(r.id);
+
+  // 3c. Mark symbols with exported=1 as exported — the extractor sets this flag when the
+  // author writes `export interface Foo { }` / `export type Bar = ...` / `export function`.
+  // Cross-file edge inference misses these when the symbol is only used as a type annotation
+  // within the same file (no calls/imports-type edge is produced for same-file type usage).
+  // Scoped to affected files only for the incremental path (#1583).
+  const explicitlyExported = db
+    .prepare(
+      `SELECT id FROM nodes
+      WHERE exported = 1
+        AND kind NOT IN ('file', 'directory', 'parameter', 'property')
+        AND file IN (${placeholders})`,
+    )
+    .all(...allAffectedFiles) as { id: number }[];
+  for (const r of explicitlyExported) exportedIds.add(r.id);
 
   // 4. Production fan-in for affected nodes only
   const prodFanInMap = new Map<number, number>();

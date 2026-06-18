@@ -220,4 +220,112 @@ describe('classifyNodeRoles', () => {
     const role = db.prepare("SELECT role FROM nodes WHERE name = 'UnusedInterface'").get();
     expect(role.role).toBe('dead-unresolved');
   });
+
+  it('does not classify exported interface as dead when used only as same-file type annotation (#1583)', () => {
+    // Simulate: exported interface whose only usage is as a parameter type in the same file.
+    // No cross-file imports-type edge exists because same-file type annotations don't produce edges.
+    // The extractor marks the interface as exported=1. The classifier must honour that flag.
+    db.prepare('INSERT INTO nodes (name, kind, file, line, exported) VALUES (?, ?, ?, ?, ?)').run(
+      'MyOpts',
+      'interface',
+      'src/helpers.ts',
+      10,
+      1,
+    );
+
+    classifyNodeRoles(db);
+    const role = db.prepare("SELECT role FROM nodes WHERE name = 'MyOpts'").get();
+    // Should be entry (exported, fan-in 0), not dead-unresolved
+    expect(role.role).toBe('entry');
+  });
+
+  it('classifies non-exported interface with no callers as dead-unresolved (#1583 boundary)', () => {
+    // An interface without export keyword and without cross-file references is genuinely dead.
+    db.prepare('INSERT INTO nodes (name, kind, file, line, exported) VALUES (?, ?, ?, ?, ?)').run(
+      'InternalOpts',
+      'interface',
+      'src/helpers.ts',
+      20,
+      0,
+    );
+
+    classifyNodeRoles(db);
+    const role = db.prepare("SELECT role FROM nodes WHERE name = 'InternalOpts'").get();
+    expect(role.role).toBe('dead-unresolved');
+  });
+
+  it('does not classify struct/enum/trait as dead when file has active callables (#1584)', () => {
+    // Simulate a Rust file with struct definitions used as type parameters.
+    // The structs have fan_in=0 (no call edges — type annotations don't produce edges),
+    // but the file has active functions. The structs are almost certainly live.
+    insertNode('build_edges.rs', 'file', 'build_edges.rs', 0);
+    // An external caller that makes build_graph "active" (fan_in > 0)
+    const externalCaller = insertNode('main', 'function', 'main.rs', 1);
+    const fn1 = insertNode('build_graph', 'function', 'build_edges.rs', 10);
+    const fn2 = insertNode('resolve_imports', 'function', 'build_edges.rs', 50);
+    insertNode('NodeInfo', 'struct', 'build_edges.rs', 5);
+    insertNode('CallInfo', 'struct', 'build_edges.rs', 15);
+    insertNode('EdgeKind', 'enum', 'build_edges.rs', 25);
+    insertNode('Resolvable', 'trait', 'build_edges.rs', 35);
+
+    // The file has active callables: fn1 is called externally, fn1 calls fn2
+    insertEdge(externalCaller, fn1, 'calls');
+    insertEdge(fn1, fn2, 'calls');
+    // Structs have no call edges (they are used as type annotations only)
+
+    classifyNodeRoles(db);
+
+    const getRole = (name) => db.prepare('SELECT role FROM nodes WHERE name = ?').get(name)?.role;
+
+    // Functions are classified normally (they have edges)
+    expect(getRole('build_graph')).not.toMatch(/^dead/);
+    // Struct/enum/trait with active file siblings should be leaf, not dead
+    expect(getRole('NodeInfo')).toBe('leaf');
+    expect(getRole('CallInfo')).toBe('leaf');
+    expect(getRole('EdgeKind')).toBe('leaf');
+    expect(getRole('Resolvable')).toBe('leaf');
+  });
+
+  it('classifies struct with no active file siblings as dead (#1584 boundary)', () => {
+    // A struct in a file with no other active callables is genuinely dead.
+    insertNode('orphan.rs', 'file', 'orphan.rs', 0);
+    insertNode('OrphanStruct', 'struct', 'orphan.rs', 5);
+
+    classifyNodeRoles(db);
+    const role = db.prepare("SELECT role FROM nodes WHERE name = 'OrphanStruct'").get();
+    // No active callables in the file — the struct is dead (dead-ffi for .rs files)
+    expect(role.role).toMatch(/^dead/);
+  });
+
+  it('classifies Commander.js execute/validate methods in cli/commands/ as entry (#1585)', () => {
+    // Simulate the Commander.js command object pattern:
+    //   export const command = { execute(args, opts, ctx) { ... }, validate(args) { ... } }
+    // These methods have fan_in=0 because Commander dispatches them dynamically.
+    // They must be classified as `entry`, not `dead-entry`, so they don't appear
+    // in `--role dead` output and don't pollute dead-code analysis.
+    insertNode('src/cli/commands/roles.ts', 'file', 'src/cli/commands/roles.ts', 0);
+    insertNode('execute', 'method', 'src/cli/commands/roles.ts', 26);
+    insertNode('validate', 'method', 'src/cli/commands/roles.ts', 21);
+
+    classifyNodeRoles(db);
+
+    const getRole = (name) => db.prepare('SELECT role FROM nodes WHERE name = ?').get(name)?.role;
+
+    expect(getRole('execute')).toBe('entry');
+    expect(getRole('validate')).toBe('entry');
+  });
+
+  it('does not classify execute/validate as entry when not in a framework directory (#1585 boundary)', () => {
+    // An `execute` method in a non-CLI file (e.g. a utility class) should NOT
+    // be promoted to `entry` just because of its name.
+    insertNode('src/utils/executor.ts', 'file', 'src/utils/executor.ts', 0);
+    insertNode('execute', 'method', 'src/utils/executor.ts', 10);
+
+    classifyNodeRoles(db);
+
+    const role = db.prepare("SELECT role FROM nodes WHERE name = 'execute'").get()?.role;
+    // Not in a framework directory — should be dead-unresolved (no callers)
+    expect(role).not.toBe('entry');
+    expect(role).toMatch(/^dead/);
+  });
 });
