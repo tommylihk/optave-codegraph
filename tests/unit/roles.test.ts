@@ -297,6 +297,71 @@ describe('classifyNodeRoles', () => {
     expect(role.role).toMatch(/^dead/);
   });
 
+  it('classifies Commander.js execute/validate methods in cli/commands/ as entry (#1585)', () => {
+    // Simulate the Commander.js command object pattern:
+    //   export const command = { execute(args, opts, ctx) { ... }, validate(args) { ... } }
+    // These methods have fan_in=0 because Commander dispatches them dynamically.
+    // They must be classified as `entry`, not `dead-entry`, so they don't appear
+    // in `--role dead` output and don't pollute dead-code analysis.
+    insertNode('src/cli/commands/roles.ts', 'file', 'src/cli/commands/roles.ts', 0);
+    insertNode('execute', 'method', 'src/cli/commands/roles.ts', 26);
+    insertNode('validate', 'method', 'src/cli/commands/roles.ts', 21);
+
+    classifyNodeRoles(db);
+
+    const getRole = (name) => db.prepare('SELECT role FROM nodes WHERE name = ?').get(name)?.role;
+
+    expect(getRole('execute')).toBe('entry');
+    expect(getRole('validate')).toBe('entry');
+  });
+
+  it('does not classify execute/validate as entry when not in a framework directory (#1585 boundary)', () => {
+    // An `execute` method in a non-CLI file (e.g. a utility class) should NOT
+    // be promoted to `entry` just because of its name.
+    insertNode('src/utils/executor.ts', 'file', 'src/utils/executor.ts', 0);
+    insertNode('execute', 'method', 'src/utils/executor.ts', 10);
+
+    classifyNodeRoles(db);
+
+    const role = db.prepare("SELECT role FROM nodes WHERE name = 'execute'").get()?.role;
+    // Not in a framework directory — should be dead-unresolved (no callers)
+    expect(role).not.toBe('entry');
+    expect(role).toMatch(/^dead/);
+  });
+
+  it('does not promote sole function with fanIn=0, fanOut>0 to leaf via self-sibling (#1586 boundary)', () => {
+    // A function with fanIn=0, fanOut>0 that is the ONLY callable in its file
+    // must NOT see its own file as "active" and thereby promote itself to leaf.
+    // Previously buildActiveFilesSet used (fan_in > 0 || fan_out > 0), causing
+    // this node to add its own file to activeFiles, discover hasActiveFileSiblings=true,
+    // and be promoted to leaf despite having zero callers.
+    insertNode('src/helpers/isolated.ts', 'file', 'src/helpers/isolated.ts', 0);
+    const helper = insertNode('helperB', 'function', 'src/helpers/isolated.ts', 5);
+    // A callee for helperB so fanOut > 0
+    const callee = insertNode('callee', 'function', 'src/helpers/other.ts', 10);
+    insertEdge(helper, callee, 'calls');
+
+    classifyNodeRoles(db);
+
+    const role = db.prepare("SELECT role FROM nodes WHERE name = 'helperB'").get()?.role;
+    // helperB has fanIn=0, fanOut=1, sole callable in its file — must stay dead-unresolved
+    expect(role).toBe('dead-unresolved');
+  });
+
+  it('does not promote sole method with fanIn=0, fanOut>0 to leaf via self-sibling (#1586 boundary)', () => {
+    // Same self-sibling false-negative as above, but for a method kind.
+    insertNode('src/helpers/isolated2.ts', 'file', 'src/helpers/isolated2.ts', 0);
+    const method = insertNode('doWork', 'method', 'src/helpers/isolated2.ts', 5);
+    const callee = insertNode('calleeM', 'function', 'src/helpers/other2.ts', 10);
+    insertEdge(method, callee, 'calls');
+
+    classifyNodeRoles(db);
+
+    const role = db.prepare("SELECT role FROM nodes WHERE name = 'doWork'").get()?.role;
+    // doWork has fanIn=0, fanOut=1, sole callable in its file — must stay dead-unresolved
+    expect(role).toBe('dead-unresolved');
+  });
+
   it('incremental path: does not classify exported interface as dead when used only as same-file type annotation (#1583)', () => {
     // Exercises classifyNodeRolesIncremental (triggered by passing changedFiles).
     // An exported=1 interface with no cross-file edges must be promoted to entry,

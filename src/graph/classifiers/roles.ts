@@ -37,6 +37,17 @@ const ENTRY_PATH_PATTERNS: readonly RegExp[] = [
   /middleware[/\\]/,
 ];
 
+/**
+ * Well-known Commander.js dispatch method names.
+ * When a method with one of these names lives in a file that matches
+ * ENTRY_PATH_PATTERNS, it is the actual framework entry point — not merely a
+ * candidate — so it must be classified as `entry` rather than `dead-entry`.
+ *
+ * `execute` — the action callback invoked by Commander on `program.action()`.
+ * `validate` — a pre-execution argument/option validator called before `execute`.
+ */
+const COMMANDER_DISPATCH_NAMES = new Set(['execute', 'validate']);
+
 export interface ClassifiableNode {
   kind?: string;
   file?: string;
@@ -82,7 +93,16 @@ export interface RoleClassificationNode {
   isExported: boolean;
   testOnlyFanIn?: number;
   productionFanIn?: number;
-  /** True when the same file contains at least one non-annotation-only callable connected to the graph (fanIn > 0 or fanOut > 0). Populated for `constant` and all `TYPE_DEF_KINDS`; `undefined` for regular callables. */
+  /**
+   * True when the same file contains at least one callable connected to the graph
+   * (fanIn > 0 or fanOut > 0) that is not itself an annotation-only kind.
+   * Annotation-only kinds are `constant` and all members of `TYPE_DEF_KINDS`
+   * (struct, enum, trait, type, interface, record) — these are excluded because
+   * they are consumed via references/type-annotations rather than call edges and
+   * would otherwise produce a circular dependency in the active-file heuristic.
+   * Populated only for `constant` and `TYPE_DEF_KINDS` nodes; `undefined` for
+   * regular callables (functions, methods, classes, etc.) which don't need it.
+   */
   hasActiveFileSiblings?: boolean;
 }
 
@@ -121,6 +141,23 @@ function classifyUnreferencedNode(node: RoleClassificationNode): Role {
       // these types are almost certainly live — classify as leaf.
       return 'leaf';
     }
+    if (node.kind === 'method' && node.fanOut > 0) {
+      // Methods implementing interfaces are dispatched via conditional property
+      // access e.g. `if (v.enterFunction) v.enterFunction(...)`. Codegraph
+      // resolves the call to the property accessor rather than to the concrete
+      // method implementation, so the method has no inbound call edge. We
+      // require `fanOut > 0` as evidence of non-triviality, mirroring the
+      // function case — trivially-inert dead helper methods remain visible.
+      return 'leaf';
+    }
+    if (node.kind === 'function' && node.fanOut > 0) {
+      // Functions referenced as logical-or fallback defaults — e.g.
+      // `const fn = options._fetchLatest || fetchLatestVersion` — appear as
+      // value references, not call sites, so no call edge is produced. We
+      // require `fanOut > 0` as evidence that the function is non-trivial
+      // (i.e. it calls something), ruling out truly inert dead helpers.
+      return 'leaf';
+    }
   }
   if (node.testOnlyFanIn != null && node.testOnlyFanIn > 0) return 'test-only';
   return classifyDeadSubRole(node);
@@ -146,7 +183,20 @@ function classifyNodeRole(node: RoleClassificationNode, medFanIn: number, medFan
   if (FRAMEWORK_ENTRY_PREFIXES.some((p) => node.name.startsWith(p))) return 'entry';
 
   if (node.fanIn === 0) {
-    return node.isExported ? 'entry' : classifyUnreferencedNode(node);
+    if (!node.isExported) {
+      // Well-known Commander.js dispatch methods (execute, validate) in framework
+      // directories are confirmed entry points, not candidates. Promote them to
+      // `entry` directly so they don't appear in `--role dead` output.
+      if (
+        node.file &&
+        COMMANDER_DISPATCH_NAMES.has(node.name) &&
+        ENTRY_PATH_PATTERNS.some((p) => p.test(node.file!))
+      ) {
+        return 'entry';
+      }
+      return classifyUnreferencedNode(node);
+    }
+    return 'entry';
   }
 
   const hasProdFanIn = typeof node.productionFanIn === 'number';
