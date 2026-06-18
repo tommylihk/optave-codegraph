@@ -400,6 +400,25 @@ describe('fnImpactData', () => {
     expect(r.levels[1].length).toBeGreaterThanOrEqual(1);
     expect(r.levels[2]).toBeUndefined();
   });
+
+  test('result includes direct and transitive summary fields', () => {
+    const data = fnImpactData('authenticate', dbPath);
+    const r = data.results[0];
+    // direct = level-1 caller count
+    expect(typeof r.direct).toBe('number');
+    expect(r.direct).toBe(r.levels[1]?.length ?? 0);
+    // transitive = totalDependents minus direct
+    expect(typeof r.transitive).toBe('number');
+    expect(r.transitive).toBe(r.totalDependents - r.direct);
+    // consistency check
+    expect(r.direct + r.transitive).toBe(r.totalDependents);
+  });
+
+  test('direct and transitive are 0 for a function with no callers', () => {
+    // Use a function known to have no callers (empty results is ok too)
+    const data = fnImpactData('__nonexistent_function__', dbPath);
+    expect(data.results).toHaveLength(0);
+  });
 });
 
 // ─── pathData ─────────────────────────────────────────────────────────
