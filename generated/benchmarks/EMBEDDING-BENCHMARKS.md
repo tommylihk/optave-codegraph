@@ -6,6 +6,12 @@ Hit@N = expected symbol found in top N results.
 
 | Version | Model | Symbols | Hit@1 | Hit@3 | Hit@5 | Misses | Embed Time |
 |---------|-------|--------:|------:|------:|------:|-------:|-----------:|
+| 3.13.0 | minilm | 1500 | 64.9% ↑0.9pp | 85.1% ~ | 90.5% ~ | 76 | 159.1s |
+| 3.13.0 | jina-base | 1500 | 70.8% | 90.4% | 93.7% | 58 | 1336.9s |
+| 3.13.0 | jina-code | 1500 | 67.6% ↓0.9pp | 84.7% ~ | 90.1% ↑0.9pp | 77 | 1212.8s |
+| 3.13.0 | nomic | 1500 | 78.8% | 94.5% | 97.5% | 14 | 1292.8s |
+| 3.13.0 | nomic-v1.5 | 1500 | 77.8% | 93.7% | 96.9% | 22 | 1515.7s |
+| 3.13.0 | bge-large | 1500 | 83.3% | 96.5% | 98.5% | 9 | 2981.9s |
 | 3.12.0 | minilm | 1500 | 64.0% ↓2.6pp | 84.7% ↓2.0pp | 90.2% ↓1.3pp | 78 | 158.6s |
 | 3.12.0 | jina-small | 1500 | 77.4% ↑2.1pp | 92.1% ↑0.8pp | 95.1% ~ | 42 | 307.6s |
 | 3.12.0 | jina-code | 1500 | 68.5% ~ | 84.5% ↓1.3pp | 89.2% ↓1.9pp | 87 | 1342.5s |
@@ -40,18 +46,99 @@ Hit@N = expected symbol found in top N results.
 
 ### Latest results
 
-**Version:** 3.12.0 | **Strategy:** structured | **Symbols:** 1500 | **Date:** 2026-06-11
+**Version:** 3.13.0 | **Strategy:** structured | **Symbols:** 1500 | **Date:** 2026-06-17
 
 | Model | Dim | Context | Hit@1 | Hit@3 | Hit@5 | Hit@10 | Misses | Embed | Search |
 |-------|----:|--------:|------:|------:|------:|-------:|-------:|------:|-------:|
-| minilm | 384 | 256 | 64.0% | 84.7% | 90.2% | 94.8% | 78 | 158.6s | 143.0s |
-| jina-small | 512 | 8192 | 77.4% | 92.1% | 95.1% | 97.2% | 42 | 307.6s | 181.9s |
-| jina-code | 768 | 8192 | 68.5% | 84.5% | 89.2% | 94.2% | 87 | 1342.5s | 235.4s |
-| mxbai-xsmall | 384 | 4096 | 50.2% | 69.7% | 76.9% | 84.5% | 232 | 233.1s | 164.0s |
-| modernbert | 768 | 8192 | 74.7% | 91.8% | 95.1% | 97.9% | 31 | 1472.9s | 231.8s |
+| minilm | 384 | 256 | 64.9% | 85.1% | 90.5% | 94.9% | 76 | 159.1s | 137.9s |
+| jina-base | 768 | 8192 | 70.8% | 90.4% | 93.7% | 96.1% | 58 | 1336.9s | 241.9s |
+| jina-code | 768 | 8192 | 67.6% | 84.7% | 90.1% | 94.9% | 77 | 1212.8s | 244.0s |
+| nomic | 768 | 8192 | 78.8% | 94.5% | 97.5% | 99.1% | 14 | 1292.8s | 239.1s |
+| nomic-v1.5 | 768 | 8192 | 77.8% | 93.7% | 96.9% | 98.5% | 22 | 1515.7s | 243.8s |
+| bge-large | 1024 | 512 | 83.3% | 96.5% | 98.5% | 99.4% | 9 | 2981.9s | 317.4s |
 
 <!-- EMBEDDING_BENCHMARK_DATA
 [
+  {
+    "version": "3.13.0",
+    "date": "2026-06-17",
+    "strategy": "structured",
+    "symbols": 1500,
+    "models": {
+      "minilm": {
+        "dim": 384,
+        "contextWindow": 256,
+        "hits1": 974,
+        "hits3": 1277,
+        "hits5": 1357,
+        "hits10": 1424,
+        "misses": 76,
+        "total": 1500,
+        "embedTimeMs": 159145,
+        "searchTimeMs": 137908
+      },
+      "jina-base": {
+        "dim": 768,
+        "contextWindow": 8192,
+        "hits1": 1062,
+        "hits3": 1356,
+        "hits5": 1406,
+        "hits10": 1442,
+        "misses": 58,
+        "total": 1500,
+        "embedTimeMs": 1336938,
+        "searchTimeMs": 241933
+      },
+      "jina-code": {
+        "dim": 768,
+        "contextWindow": 8192,
+        "hits1": 1014,
+        "hits3": 1271,
+        "hits5": 1352,
+        "hits10": 1423,
+        "misses": 77,
+        "total": 1500,
+        "embedTimeMs": 1212751,
+        "searchTimeMs": 243954
+      },
+      "nomic": {
+        "dim": 768,
+        "contextWindow": 8192,
+        "hits1": 1182,
+        "hits3": 1418,
+        "hits5": 1463,
+        "hits10": 1486,
+        "misses": 14,
+        "total": 1500,
+        "embedTimeMs": 1292823,
+        "searchTimeMs": 239133
+      },
+      "nomic-v1.5": {
+        "dim": 768,
+        "contextWindow": 8192,
+        "hits1": 1167,
+        "hits3": 1405,
+        "hits5": 1454,
+        "hits10": 1478,
+        "misses": 22,
+        "total": 1500,
+        "embedTimeMs": 1515749,
+        "searchTimeMs": 243835
+      },
+      "bge-large": {
+        "dim": 1024,
+        "contextWindow": 512,
+        "hits1": 1249,
+        "hits3": 1448,
+        "hits5": 1478,
+        "hits10": 1491,
+        "misses": 9,
+        "total": 1500,
+        "embedTimeMs": 2981905,
+        "searchTimeMs": 317446
+      }
+    }
+  },
   {
     "version": "3.12.0",
     "date": "2026-06-11",
