@@ -1,0 +1,126 @@
+import type { DataflowRulesConfig, TreeSitterNode } from '../../types.js';
+import { makeDataflowRules } from '../shared.js';
+
+// ─── C/C++ function-name extraction ──────────────────────────────────────────
+//
+// C/C++ function_definition nests the name inside declarators:
+//   function_definition
+//     declarator: function_declarator
+//       declarator: identifier | pointer_declarator | qualified_identifier | ...
+//       parameters: parameter_list
+//
+// We unwrap through common decorator wrappers to reach the bare identifier.
+
+const DECLARATOR_WRAPPERS = new Set([
+  'pointer_declarator',
+  'reference_declarator',
+  'array_declarator',
+  'parenthesized_declarator',
+  'abstract_function_declarator',
+]);
+
+function unwrapDeclarator(node: TreeSitterNode | null): TreeSitterNode | null {
+  let cur = node;
+  while (cur && DECLARATOR_WRAPPERS.has(cur.type)) {
+    cur = cur.childForFieldName('declarator');
+  }
+  return cur;
+}
+
+function extractCFunctionName(node: TreeSitterNode): string | null {
+  const decl = node.childForFieldName('declarator');
+  if (!decl) return null;
+
+  // decl is typically function_declarator for a top-level function
+  const funcDecl = decl.type === 'function_declarator' ? decl : null;
+  if (!funcDecl) return null;
+
+  const inner = funcDecl.childForFieldName('declarator');
+  const nameNode = unwrapDeclarator(inner);
+  if (!nameNode) return null;
+
+  // qualified_identifier (C++ method): extract the unqualified_identifier
+  if (nameNode.type === 'qualified_identifier') {
+    const unqual =
+      nameNode.childForFieldName('name') ??
+      nameNode.namedChildren[nameNode.namedChildren.length - 1] ??
+      null;
+    return unqual?.text ?? null;
+  }
+
+  return nameNode.type === 'identifier' || nameNode.type === 'field_identifier'
+    ? nameNode.text
+    : null;
+}
+
+function extractCParamName(node: TreeSitterNode): string[] | null {
+  if (node.type !== 'parameter_declaration') return null;
+  const decl = node.childForFieldName('declarator');
+  const nameNode = unwrapDeclarator(decl);
+  if (!nameNode) return null;
+  if (nameNode.type === 'identifier') return [nameNode.text];
+  // Reference declarator: &name (C++)
+  if (nameNode.type === 'reference_declarator') {
+    const inner = unwrapDeclarator(nameNode);
+    if (inner?.type === 'identifier') return [inner.text];
+  }
+  return null;
+}
+
+// ─── C Dataflow rules ─────────────────────────────────────────────────────────
+
+export const dataflow: DataflowRulesConfig = makeDataflowRules({
+  functionNodes: new Set(['function_definition']),
+  nameField: 'declarator',
+  nameExtractor: extractCFunctionName,
+
+  paramListField: 'parameters',
+  paramIdentifier: 'identifier',
+  paramWrapperTypes: new Set(['parameter_declaration']),
+  extractParamName: extractCParamName,
+
+  returnNode: 'return_statement',
+
+  varDeclaratorNode: 'init_declarator',
+  varNameField: 'declarator',
+  varValueField: 'value',
+
+  assignmentNode: 'assignment_expression',
+  assignLeftField: 'left',
+  assignRightField: 'right',
+
+  callNode: 'call_expression',
+  callFunctionField: 'function',
+  callArgsField: 'arguments',
+
+  memberNode: 'field_expression',
+  memberObjectField: 'argument',
+  memberPropertyField: 'field',
+
+  expressionStmtNode: 'expression_statement',
+  mutatingMethods: new Set(),
+});
+
+// C++ extends C with additional function node types
+export const dataflowCpp: DataflowRulesConfig = makeDataflowRules({
+  ...dataflow,
+  functionNodes: new Set([
+    'function_definition',
+    'function_declaration', // prototype with body in C++
+  ]),
+  // C++ call expressions can use :: scope resolution
+  mutatingMethods: new Set([
+    'push_back',
+    'push_front',
+    'insert',
+    'erase',
+    'clear',
+    'resize',
+    'reserve',
+    'emplace',
+    'emplace_back',
+    'emplace_front',
+    'append',
+    'assign',
+  ]),
+});

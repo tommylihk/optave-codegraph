@@ -80,6 +80,7 @@ export const DATAFLOW_DEFAULTS: DataflowRulesConfig = {
 
   // Function name extraction
   nameField: 'name',
+  nameExtractor: null, // override for languages with nested name structures (C/C++)
   varAssignedFnParent: null, // parent type for `const fn = ...` (JS only)
   assignmentFnParent: null, // parent type for `x = function...` (JS only)
   pairFnParent: null, // parent type for `{ key: function }` (JS only)

@@ -960,6 +960,8 @@ export interface CfgRulesConfig {
 export interface DataflowRulesConfig {
   functionNodes: Set<string>;
   nameField: string;
+  /** Override for languages with nested function name structures (e.g. C/C++). */
+  nameExtractor: ((node: TreeSitterNode) => string | null) | null;
   varAssignedFnParent: string | null;
   assignmentFnParent: string | null;
   pairFnParent: string | null;
