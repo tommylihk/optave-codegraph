@@ -40,6 +40,13 @@ const ENTRY_PATH_PATTERNS: &[&str] = &[
     "middleware\\",
 ];
 
+/// Well-known Commander.js dispatch method names.
+/// When a method with one of these names lives in a file matching
+/// ENTRY_PATH_PATTERNS it is the actual framework entry point — not merely a
+/// candidate — so it is classified as `entry` rather than `dead-entry`.
+/// Mirrors `COMMANDER_DISPATCH_NAMES` in `graph/classifiers/roles.ts`.
+const COMMANDER_DISPATCH_NAMES: &[&str] = &["execute", "validate"];
+
 const TEST_FILE_PATTERNS: &[&str] = &[
     "%.test.%",
     "%.spec.%",
@@ -130,6 +137,14 @@ fn classify_node(
     }
 
     if fan_in == 0 && !is_exported {
+        // Well-known Commander.js dispatch methods (execute, validate) in framework
+        // directories are confirmed entry points, not candidates. Promote them to
+        // `entry` so they don't appear in `--role dead` output.
+        if COMMANDER_DISPATCH_NAMES.iter().any(|n| *n == name)
+            && ENTRY_PATH_PATTERNS.iter().any(|p| file.contains(p))
+        {
+            return "entry";
+        }
         if has_active_file_siblings {
             // Constants consumed via identifier reference (not calls) have no
             // inbound call edges. If the same file has active callables, the

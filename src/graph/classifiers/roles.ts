@@ -37,6 +37,17 @@ const ENTRY_PATH_PATTERNS: readonly RegExp[] = [
   /middleware[/\\]/,
 ];
 
+/**
+ * Well-known Commander.js dispatch method names.
+ * When a method with one of these names lives in a file that matches
+ * ENTRY_PATH_PATTERNS, it is the actual framework entry point — not merely a
+ * candidate — so it must be classified as `entry` rather than `dead-entry`.
+ *
+ * `execute` — the action callback invoked by Commander on `program.action()`.
+ * `validate` — a pre-execution argument/option validator called before `execute`.
+ */
+const COMMANDER_DISPATCH_NAMES = new Set(['execute', 'validate']);
+
 export interface ClassifiableNode {
   kind?: string;
   file?: string;
@@ -146,7 +157,20 @@ function classifyNodeRole(node: RoleClassificationNode, medFanIn: number, medFan
   if (FRAMEWORK_ENTRY_PREFIXES.some((p) => node.name.startsWith(p))) return 'entry';
 
   if (node.fanIn === 0) {
-    return node.isExported ? 'entry' : classifyUnreferencedNode(node);
+    if (!node.isExported) {
+      // Well-known Commander.js dispatch methods (execute, validate) in framework
+      // directories are confirmed entry points, not candidates. Promote them to
+      // `entry` directly so they don't appear in `--role dead` output.
+      if (
+        node.file &&
+        COMMANDER_DISPATCH_NAMES.has(node.name) &&
+        ENTRY_PATH_PATTERNS.some((p) => p.test(node.file!))
+      ) {
+        return 'entry';
+      }
+      return classifyUnreferencedNode(node);
+    }
+    return 'entry';
   }
 
   const hasProdFanIn = typeof node.productionFanIn === 'number';
