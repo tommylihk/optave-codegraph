@@ -682,7 +682,8 @@ while iteration < maxIterations:
                          4. If Rust source changed: rebuild the native addon before running tests
                             npx napi build --platform --release --manifest-path crates/codegraph-core/Cargo.toml --output-dir .
                             PLATFORM=$(node -e "const os=require('os');const arch=os.arch()==='arm64'?'arm64':'x64';console.log(os.platform()+'-'+arch)")
-                            if [[ "$(uname)" == "Darwin" ]]; then codesign --sign - --force "node_modules/@optave/codegraph-${PLATFORM}/codegraph-core.node"; fi
+                            if [[ "$(uname)" == "Darwin" ]]; then codesign --sign - --force codegraph-core.node; fi
+                            cp codegraph-core.node "node_modules/@optave/codegraph-${PLATFORM}/codegraph-core.node"
                          5. Verify with: <testCmd>
                          6. Commit fixes with: 'fix: correct regressions from forge phase <N>'
                          7. Do NOT stage: package-lock.json, vitest.config.worktree.ts, tests/benchmarks/resolution/fixtures/python/__pycache__/
@@ -818,7 +819,8 @@ while iteration < maxIterations:
                          4. If Rust source changed: rebuild the native addon before running tests
                             npx napi build --platform --release --manifest-path crates/codegraph-core/Cargo.toml --output-dir .
                             PLATFORM=$(node -e "const os=require('os');const arch=os.arch()==='arm64'?'arm64':'x64';console.log(os.platform()+'-'+arch)")
-                            if [[ "$(uname)" == "Darwin" ]]; then codesign --sign - --force "node_modules/@optave/codegraph-${PLATFORM}/codegraph-core.node"; fi
+                            if [[ "$(uname)" == "Darwin" ]]; then codesign --sign - --force codegraph-core.node; fi
+                            cp codegraph-core.node "node_modules/@optave/codegraph-${PLATFORM}/codegraph-core.node"
                          5. Verify with: <testCmd>
                          6. Commit fixes with: 'fix: correct regressions from grind phase <N>'
                          7. Do NOT stage: package-lock.json, vitest.config.worktree.ts, tests/benchmarks/resolution/fixtures/python/__pycache__/
