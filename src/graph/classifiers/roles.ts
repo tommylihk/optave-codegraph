@@ -132,13 +132,13 @@ function classifyUnreferencedNode(node: RoleClassificationNode): Role {
       // these types are almost certainly live — classify as leaf.
       return 'leaf';
     }
-    if (node.kind === 'method') {
+    if (node.kind === 'method' && node.fanOut > 0) {
       // Methods implementing interfaces are dispatched via conditional property
       // access e.g. `if (v.enterFunction) v.enterFunction(...)`. Codegraph
       // resolves the call to the property accessor rather than to the concrete
-      // method implementation, so the method has no inbound call edge. All
-      // methods with active file siblings are almost certainly interface
-      // implementations — classify as leaf.
+      // method implementation, so the method has no inbound call edge. We
+      // require `fanOut > 0` as evidence of non-triviality, mirroring the
+      // function case — trivially-inert dead helper methods remain visible.
       return 'leaf';
     }
     if (node.kind === 'function' && node.fanOut > 0) {

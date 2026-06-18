@@ -415,9 +415,13 @@ describe('fnImpactData', () => {
   });
 
   test('direct and transitive are 0 for a function with no callers', () => {
-    // Use a function known to have no callers (empty results is ok too)
-    const data = fnImpactData('__nonexistent_function__', dbPath);
-    expect(data.results).toHaveLength(0);
+    // handleRoute is the root of the call graph — nothing calls it
+    const data = fnImpactData('handleRoute', dbPath);
+    expect(data.results).toHaveLength(1);
+    const r = data.results[0];
+    expect(r.direct).toBe(0);
+    expect(r.transitive).toBe(0);
+    expect(r.totalDependents).toBe(0);
   });
 });
 

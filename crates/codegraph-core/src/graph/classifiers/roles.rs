@@ -162,10 +162,10 @@ fn classify_node(
             // Methods implementing interfaces are dispatched via conditional property
             // access e.g. `if (v.enterFunction) v.enterFunction(...)`. Codegraph
             // resolves the call to the property accessor rather than to the concrete
-            // method implementation, so the method has no inbound call edge. All
-            // methods with active file siblings are almost certainly interface
-            // implementations — classify as leaf.
-            if kind == "method" {
+            // method implementation, so the method has no inbound call edge. We
+            // require `fan_out > 0` as evidence of non-triviality, mirroring the
+            // function case — trivially-inert dead helper methods remain visible.
+            if kind == "method" && fan_out > 0 {
                 return "leaf";
             }
             // Functions referenced as logical-or fallback defaults — e.g.
