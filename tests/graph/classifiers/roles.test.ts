@@ -438,6 +438,34 @@ describe('classifyRoles', () => {
     expect(roles.get('1')).toBe('dead-unresolved');
   });
 
+  it('classifies method as dead-unresolved when fanOut === 0 even with active file siblings (pattern 2: inert)', () => {
+    // A method with no callers and no outgoing calls in a busy file is a genuinely dead
+    // helper — the fanOut > 0 guard keeps it visible in --role dead output.
+    const nodes = [
+      {
+        id: '1',
+        name: 'unusedHelper',
+        kind: 'method',
+        file: 'src/graph/classifiers/roles.ts',
+        fanIn: 0,
+        fanOut: 0,
+        isExported: false,
+        hasActiveFileSiblings: true,
+      },
+      {
+        id: '2',
+        name: 'classifyUnreferencedNode',
+        kind: 'function',
+        file: 'src/graph/classifiers/roles.ts',
+        fanIn: 5,
+        fanOut: 3,
+        isExported: false,
+      },
+    ];
+    const roles = classifyRoles(nodes);
+    expect(roles.get('1')).toBe('dead-unresolved');
+  });
+
   // ── Pattern 3: logical-or fallback defaults ────────────────────────────────
 
   it('classifies function as leaf when used as logical-or default and file has active callables (pattern 3)', () => {
