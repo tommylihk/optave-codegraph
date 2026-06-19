@@ -4,6 +4,7 @@ import type {
   DataflowRulesConfig,
   HalsteadRules,
 } from '../../types.js';
+import * as c from './c.js';
 import * as csharp from './csharp.js';
 import * as go from './go.js';
 import * as java from './java.js';
@@ -71,6 +72,11 @@ export const DATAFLOW_RULES: Map<string, DataflowRulesConfig> = new Map([
   ['csharp', csharp.dataflow],
   ['php', php.dataflow],
   ['ruby', ruby.dataflow],
+  // P5 Batch B1: C-family languages
+  ['c', c.dataflow],
+  ['cpp', c.dataflowCpp],
+  ['objc', c.dataflow], // ObjC C-compatible functions; ObjC methods TODO
+  ['cuda', c.dataflowCpp], // CUDA inherits C++ grammar
 ]);
 
 // ─── AST Node Type Maps ──────────────────────────────────────────────────

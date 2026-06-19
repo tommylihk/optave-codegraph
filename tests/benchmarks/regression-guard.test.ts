@@ -286,6 +286,18 @@ const SKIP_VERSIONS = new Set(['3.8.0']);
  *   to the 3.11.2:No-op rebuild pattern. Remove once 3.13+ data confirms the
  *   steady-state.
  *
+ * - 3.13.0:1-file rebuild — CI runner variance on a sub-100ms native metric.
+ *   PR #1608 (dataflow vertex schema, migration v18) measured 73ms → 139ms
+ *   (+90%, NOISY_METRIC_THRESHOLD 75%). Migration v18 runs only once — the
+ *   applyMigrations path for an already-migrated DB is a single SELECT on
+ *   schema_version (O(1)) before the loop short-circuits, so no DDL executes
+ *   on incremental rebuilds. The spike is shared-runner scheduling noise
+ *   amplified by the sub-100ms baseline: 73ms sits inside the documented
+ *   64–115ms spread for this metric, and a +66ms absolute jitter is within the
+ *   range seen in prior exemptions (3.11.2: +129ms, 3.12.0: +45ms). Same shape
+ *   and root cause as 3.12.0:1-file rebuild. Remove once 3.14+ data confirms
+ *   the steady-state.
+ *
  * NOTE: WASM *timing* noise no longer needs per-version entries here — it is
  * handled structurally by WASM_TIMING_THRESHOLD (see above). The 3.11.x
  * entries that remain are kept because they trip the *native* engine too
@@ -296,6 +308,11 @@ const KNOWN_REGRESSIONS = new Set([
   '3.12.0:No-op rebuild',
   '3.12.0:Full build',
   '3.12.0:1-file rebuild',
+  // PR #1608 dataflow vertex schema: CI runner variance on a sub-100ms metric.
+  // Migration v18 is a one-time operation; subsequent incremental rebuilds only
+  // pay an O(1) SELECT on schema_version. Remove once 3.14+ data confirms
+  // the steady-state (see KNOWN_REGRESSIONS comment above for full analysis).
+  '3.13.0:1-file rebuild',
   // tree-sitter-erlang devDependency removed (GHSA-rphw-c8qj-jv84 — malware).
   // The erlang WASM is no longer built, so erlang resolution drops to 0%.
   // These entries exempt the expected precision/recall drop on every build

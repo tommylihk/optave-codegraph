@@ -13,6 +13,7 @@ interface ParamInfo {
 
 interface LanguageRules {
   nameField: string;
+  nameExtractor?: ((node: TreeSitterNode) => string | null) | null;
   varAssignedFnParent?: string;
   pairFnParent?: string;
   assignmentFnParent?: string;
@@ -47,6 +48,10 @@ export function truncate(str: string, max = 120): string {
  */
 export function functionName(fnNode: TreeSitterNode | null, rules: LanguageRules): string | null {
   if (!fnNode) return null;
+  if (rules.nameExtractor) {
+    const extracted = rules.nameExtractor(fnNode);
+    if (extracted) return extracted;
+  }
   const nameNode = fnNode.childForFieldName(rules.nameField);
   if (nameNode) return nameNode.text;
 

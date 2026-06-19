@@ -52,7 +52,13 @@ export type CoreEdgeKind =
 export type StructuralEdgeKind = 'parameter_of' | 'receiver';
 
 /** Dataflow-specific edge kinds. */
-export type DataflowEdgeKind = 'flows_to' | 'returns' | 'mutates';
+export type DataflowEdgeKind =
+  | 'flows_to'
+  | 'returns'
+  | 'mutates'
+  | 'def_use'
+  | 'arg_in'
+  | 'return_out';
 
 /** All edge kinds that can appear in the graph. */
 export type EdgeKind = CoreEdgeKind | StructuralEdgeKind;
@@ -954,10 +960,14 @@ export interface CfgRulesConfig {
 export interface DataflowRulesConfig {
   functionNodes: Set<string>;
   nameField: string;
+  /** Override for languages with nested function name structures (e.g. C/C++). */
+  nameExtractor: ((node: TreeSitterNode) => string | null) | null;
   varAssignedFnParent: string | null;
   assignmentFnParent: string | null;
   pairFnParent: string | null;
   paramListField: string;
+  /** Override for languages where the param list is nested (e.g. C: function_definition → declarator → parameters). */
+  getParamListNode: ((funcNode: TreeSitterNode) => TreeSitterNode | null) | null;
   paramIdentifier: string;
   paramWrapperTypes: Set<string>;
   defaultParamType: string | null;
@@ -1016,6 +1026,20 @@ export interface CfgEdge {
   from: number;
   to: number;
   label?: string;
+}
+
+/**
+ * A dataflow vertex: an addressable data location within a function.
+ * Populated during extraction (P1+); persisted to `dataflow_vertices`.
+ */
+export interface DataflowVertex {
+  /** Name of the enclosing function (used to resolve func_id at insert time). */
+  funcName: string;
+  /** Vertex kind: 'param' | 'local' | 'return' | 'receiver'. */
+  kind: 'param' | 'local' | 'return' | 'receiver';
+  name?: string;
+  paramIndex?: number;
+  line?: number;
 }
 
 /** Dataflow extraction result. */
