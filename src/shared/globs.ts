@@ -74,13 +74,17 @@ function buildCacheKey(patterns: readonly string[]): string {
  * with the same include/exclude lists reuse the compiled regexes. The
  * returned array is shared across callers and must not be mutated.
  */
-export function compileGlobs(patterns: readonly string[] | undefined): readonly RegExp[] {
+export function compileGlobs(
+  patterns: readonly string[] | undefined,
+  isExclusion: boolean = false,
+): readonly RegExp[] {
   if (!patterns || patterns.length === 0) return EMPTY_REGEX_LIST;
   const key = buildCacheKey(patterns);
   const cached = compileCache.get(key);
   if (cached) return cached;
   const out: RegExp[] = [];
-  for (const p of patterns) {
+  const transformedPatterns = isExclusion ? transformExcludePatterns(patterns) : patterns;
+  for (const p of transformedPatterns) {
     if (typeof p !== 'string' || p.length === 0) continue;
     try {
       out.push(globToRegex(p));
@@ -118,4 +122,33 @@ export function matchesAny(regexes: readonly RegExp[], path: string): boolean {
     if (re.test(path)) return true;
   }
   return false;
+}
+
+/**
+ * Transforms exclude patterns to behave more like gitignore rules.
+ */
+export function transformExcludePatterns(patterns: readonly string[]): string[] {
+  const transformed: string[] = [];
+  for (const pattern of patterns) {
+    let p = pattern;
+
+    if (p.startsWith('/')) {
+      p = p.slice(1);
+    } else if (!p.includes('/') && !p.startsWith('**')) {
+      p = `**/${p}`;
+    }
+
+    if (
+      pattern.endsWith('/') ||
+      (!pattern.includes('/') && !pattern.includes('*') && !pattern.includes('?'))
+    ) {
+      if (!p.endsWith('**') && !p.endsWith('/*')) {
+        p += '/**';
+      }
+    } else if (p.endsWith('/')) {
+      p += '**';
+    }
+    transformed.push(p);
+  }
+  return transformed;
 }

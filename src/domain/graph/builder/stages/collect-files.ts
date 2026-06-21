@@ -82,7 +82,7 @@ function tryFastCollect(
   //    Also apply gitignore patterns so the incremental fast path is consistent
   //    with the full filesystem walk (which calls readGitignorePatterns too).
   const includeRegexes = compileGlobs(config?.include);
-  const excludeRegexes = compileGlobs(config?.exclude);
+  const excludeRegexes = compileGlobs(config?.exclude, true);
   const hasGlobFilters = includeRegexes.length > 0 || excludeRegexes.length > 0;
   const gitignoreRegexes = readGitignorePatterns(rootDir);
 

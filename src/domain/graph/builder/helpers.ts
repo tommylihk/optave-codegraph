@@ -9,7 +9,12 @@ import path from 'node:path';
 import { purgeFilesData } from '../../../db/index.js';
 import { debug, warn } from '../../../infrastructure/logger.js';
 import { EXTENSIONS, IGNORE_DIRS, normalizePath } from '../../../shared/constants.js';
-import { compileGlobs, globToRegex, matchesAny } from '../../../shared/globs.js';
+import {
+  compileGlobs,
+  globToRegex,
+  matchesAny,
+  transformExcludePatterns,
+} from '../../../shared/globs.js';
 import type {
   BetterSqlite3Database,
   CodegraphConfig,
@@ -107,25 +112,17 @@ export function readGitignorePatterns(rootDir: string): readonly RegExp[] {
   }
 
   const regexes: RegExp[] = [];
-  for (const rawLine of contents.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    // Skip empty lines, comments, and negation patterns
-    if (!line || line.startsWith('#') || line.startsWith('!')) continue;
-    // Strip trailing slash (directory indicator) — we match files by path regardless
-    const pattern = line.endsWith('/') ? line.slice(0, -1) : line;
+  // Apply the same transformation logic as for exclude patterns
+  const transformedGitignorePatterns = transformExcludePatterns(
+    contents
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#') && !line.startsWith('!')),
+  );
+
+  for (const pattern of transformedGitignorePatterns) {
     try {
-      // If pattern contains no '/', it should match at any depth — prefix with `**/`.
-      // If pattern starts with '/', it is anchored to root — strip the leading slash.
-      // Otherwise use as-is (e.g. `crates/codegraph-core/index.js`).
-      let normalized: string;
-      if (pattern.startsWith('/')) {
-        normalized = pattern.slice(1);
-      } else if (!pattern.includes('/')) {
-        normalized = `**/${pattern}`;
-      } else {
-        normalized = pattern;
-      }
-      regexes.push(globToRegex(normalized));
+      regexes.push(globToRegex(pattern));
     } catch {
       // Ignore patterns that don't compile (e.g. those with unsupported syntax)
     }
@@ -235,7 +232,7 @@ export function collectFiles(
 ): string[] | { files: string[]; directories: Set<string> } {
   const trackDirs = directories instanceof Set;
   const includeRegexes = compileGlobs(config.include);
-  const excludeRegexes = compileGlobs(config.exclude);
+  const excludeRegexes = compileGlobs(config.exclude, true);
   const gitignoreRegexes = readGitignorePatterns(dir);
   const ctx: CollectContext = {
     rootDir: dir,
