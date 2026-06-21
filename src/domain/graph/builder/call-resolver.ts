@@ -66,23 +66,32 @@ function findEnclosingCallable(
   definitions: ReadonlyArray<Def>,
   relPath: string,
 ): CallerMatch {
-  let best: CallerMatch = null;
-  let bestSpan = Infinity;
+  const candidates: Array<{ def: Def; span: number }> = [];
+
   for (const def of definitions) {
     if (!CALLABLE_KINDS.has(def.kind)) continue;
     if (def.line > callLine) continue;
     const end = def.endLine ?? Infinity;
     if (callLine > end) continue;
     const span = end === Infinity ? Infinity : end - def.line;
-    if (span < bestSpan) {
-      const row = lookup.nodeId(def.name, def.kind, relPath, def.line);
-      if (row) {
-        best = { ...row, name: def.name };
-        bestSpan = span;
-      }
+    candidates.push({ def, span });
+  }
+
+  candidates.sort((a, b) => {
+    if (a.span === b.span) return 0;
+    if (a.span === Infinity) return 1;
+    if (b.span === Infinity) return -1;
+    return a.span - b.span;
+  });
+
+  for (const { def } of candidates) {
+    const row = lookup.nodeId(def.name, def.kind, relPath, def.line);
+    if (row) {
+      return { ...row, name: def.name };
     }
   }
-  return best;
+
+  return null;
 }
 
 /**
@@ -97,23 +106,32 @@ function findEnclosingBinding(
   definitions: ReadonlyArray<Def>,
   relPath: string,
 ): CallerMatch {
-  let best: CallerMatch = null;
-  let bestSpan = -1; // looking for WIDEST span, so start at -1
+  const candidates: Array<{ def: Def; span: number }> = [];
+
   for (const def of definitions) {
     if (!TOP_LEVEL_BINDING_KINDS.has(def.kind)) continue;
     if (def.line > callLine) continue;
     const end = def.endLine ?? Infinity;
     if (callLine > end) continue;
     const span = end === Infinity ? Infinity : end - def.line;
-    if (span > bestSpan) {
-      const row = lookup.nodeId(def.name, def.kind, relPath, def.line);
-      if (row) {
-        best = { ...row, name: def.name };
-        bestSpan = span;
-      }
+    candidates.push({ def, span });
+  }
+
+  candidates.sort((a, b) => {
+    if (a.span === b.span) return 0;
+    if (a.span === Infinity) return -1;
+    if (b.span === Infinity) return 1;
+    return b.span - a.span; // Descending (widest first)
+  });
+
+  for (const { def } of candidates) {
+    const row = lookup.nodeId(def.name, def.kind, relPath, def.line);
+    if (row) {
+      return { ...row, name: def.name };
     }
   }
-  return best;
+
+  return null;
 }
 
 export function findCaller(

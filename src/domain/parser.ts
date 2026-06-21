@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import type { Tree } from 'web-tree-sitter';
 import { Language, Parser, Query } from 'web-tree-sitter';
@@ -1154,6 +1155,11 @@ async function backfillTypeMapBatch(
   }
 }
 
+export interface ParseFileOpts {
+  throttlePerFileInMs?: number;
+  onFileProcessed?: (filePath: string, processed: number, total: number) => void;
+}
+
 /**
  * Parse files via WASM engine, returning a Map<relPath, symbols>.
  *
@@ -1169,10 +1175,18 @@ async function backfillTypeMapBatch(
 async function parseFilesWasm(
   filePaths: string[],
   rootDir: string,
-  analysis: WorkerAnalysisOpts = FULL_ANALYSIS,
+  options?: WorkerAnalysisOpts & ParseFileOpts,
 ): Promise<Map<string, ExtractorOutput>> {
+  const { throttlePerFileInMs, onFileProcessed, ...analysis } = options || { ...FULL_ANALYSIS };
+
+  if (Object.keys(analysis).length === 0) {
+    Object.assign(analysis, FULL_ANALYSIS);
+  }
+
   const result = new Map<string, ExtractorOutput>();
   const pool = getWasmWorkerPool();
+  let processed = 0;
+
   for (const filePath of filePaths) {
     if (!_extToLang.has(path.extname(filePath).toLowerCase())) continue;
     let code: string;
@@ -1186,6 +1200,13 @@ async function parseFilesWasm(
     if (output) {
       const relPath = path.relative(rootDir, filePath).split(path.sep).join('/');
       result.set(relPath, output);
+      if (throttlePerFileInMs) {
+        await setTimeout(throttlePerFileInMs);
+      }
+    }
+    processed++;
+    if (onFileProcessed) {
+      onFileProcessed(filePath, processed, filePaths.length);
     }
   }
   return result;
@@ -1359,10 +1380,16 @@ async function backfillNativeDrops(
 export async function parseFilesAuto(
   filePaths: string[],
   rootDir: string,
-  opts: ParseEngineOpts = {},
+  opts: ParseEngineOpts & ParseFileOpts = {},
 ): Promise<Map<string, ExtractorOutput>> {
-  const { native } = resolveEngine(opts);
-  if (!native) return parseFilesWasm(filePaths, rootDir);
+  const { throttlePerFileInMs, onFileProcessed, ...engOpt } = opts;
+  const { native } = resolveEngine(engOpt);
+  if (!native)
+    return parseFilesWasm(filePaths, rootDir, {
+      throttlePerFileInMs,
+      onFileProcessed,
+      ...FULL_ANALYSIS,
+    });
 
   const result = new Map<string, ExtractorOutput>();
   const { nativeParsed, needsTypeMap } = ingestNativeResults(native, filePaths, rootDir, result);

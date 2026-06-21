@@ -6,10 +6,10 @@
  */
 import { performance } from 'node:perf_hooks';
 import { info } from '../../../../infrastructure/logger.js';
-import { parseFilesAuto } from '../../../parser.js';
+import { type ParseFileOpts, parseFilesAuto } from '../../../parser.js';
 import type { PipelineContext } from '../context.js';
 
-export async function parseFiles(ctx: PipelineContext): Promise<void> {
+export async function parseFiles(ctx: PipelineContext, options: ParseFileOpts = {}): Promise<void> {
   const { allFiles, parseChanges, isFullBuild, engineOpts, rootDir } = ctx;
 
   ctx.filesToParse = isFullBuild ? allFiles.map((f) => ({ file: f })) : parseChanges;
@@ -17,7 +17,7 @@ export async function parseFiles(ctx: PipelineContext): Promise<void> {
 
   const filePaths = ctx.filesToParse.map((item) => item.file);
   const t0 = performance.now();
-  ctx.allSymbols = await parseFilesAuto(filePaths, rootDir, engineOpts);
+  ctx.allSymbols = await parseFilesAuto(filePaths, rootDir, { ...engineOpts, ...options });
   ctx.timing.parseMs = performance.now() - t0;
 
   const parsed = ctx.allSymbols.size;

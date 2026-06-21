@@ -7,6 +7,8 @@
  * parsers, builders, visitors, features, config, and the graph model.
  */
 
+import type { ParseFileOpts } from '#domain/parser.js';
+
 // ════════════════════════════════════════════════════════════════════════
 // §1  Symbol & Edge Kind Enumerations
 // ════════════════════════════════════════════════════════════════════════
@@ -1308,6 +1310,8 @@ export interface BuildGraphOpts {
    * build command when stdin/stdout are TTYs and CI is not set.
    */
   promptForConsent?: boolean;
+
+  parseFileOptions?: ParseFileOpts;
 }
 
 /** Build timing result from buildGraph. */

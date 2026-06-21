@@ -28,7 +28,7 @@ import { loadNative } from '../../../infrastructure/native.js';
 import { toErrorMessage } from '../../../shared/errors.js';
 import { CODEGRAPH_VERSION } from '../../../shared/version.js';
 import type { BuildGraphOpts, BuildResult } from '../../../types.js';
-import { getActiveEngine } from '../../parser.js';
+import { getActiveEngine, type ParseFileOpts } from '../../parser.js';
 import { writeJournalHeader } from '../journal.js';
 import { setWorkspaces } from '../resolve.js';
 import { PipelineContext } from './context.js';
@@ -274,7 +274,7 @@ function formatTimingResult(ctx: PipelineContext): BuildResult {
 
 // ── Pipeline stages execution ───────────────────────────────────────────
 
-async function runPipelineStages(ctx: PipelineContext): Promise<void> {
+async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = {}): Promise<void> {
   // ── WASM / fallback dual-connection mode ─────────────────────────────
   // NativeDatabase is deferred — not opened during setup. collectFiles and
   // detectChanges only need better-sqlite3. If no files changed, we exit
@@ -297,7 +297,7 @@ async function runPipelineStages(ctx: PipelineContext): Promise<void> {
 
   if (ctx.earlyExit) return;
 
-  await parseFiles(ctx);
+  await parseFiles(ctx, options);
 
   // For small incremental builds (≤smallFilesThreshold files), skip the nativeDb open/close
   // cycle for insertNodes — the WAL checkpoint + connection churn (~5-10ms)
@@ -388,6 +388,8 @@ export async function buildGraph(
   rootDir: string,
   opts: BuildGraphOpts = {},
 ): Promise<BuildResult | undefined> {
+  const { parseFileOptions } = opts;
+
   const ctx = new PipelineContext();
   ctx.buildStart = performance.now();
   ctx.opts = opts;
@@ -486,7 +488,7 @@ export async function buildGraph(
       }
     }
 
-    await runPipelineStages(ctx);
+    await runPipelineStages(ctx, parseFileOptions);
   } catch (err) {
     if (!ctx.earlyExit) {
       // Release WASM trees before closing DB to prevent V8 crash during
