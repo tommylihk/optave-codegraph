@@ -4,7 +4,7 @@ import { closeDb, findDbPath, getBuildMeta, openDb } from '../../db/index.js';
 import { warn } from '../../infrastructure/logger.js';
 import { DbError } from '../../shared/errors.js';
 import type { BetterSqlite3Database, NodeRow } from '../../types.js';
-import { embed, getModelConfig } from './models.js';
+import { type EmbedOptions, embed, getModelConfig } from './models.js';
 import { buildSourceText } from './strategies/source.js';
 import { buildStructuredText } from './strategies/structured.js';
 
@@ -193,7 +193,7 @@ function persistEmbeddings(
   insertAll();
 }
 
-export interface BuildEmbeddingsOptions {
+export interface BuildEmbeddingsOptions extends EmbedOptions {
   strategy?: EmbeddingStrategy;
 }
 
@@ -206,7 +206,8 @@ export async function buildEmbeddings(
   customDbPath?: string,
   options: BuildEmbeddingsOptions = {},
 ): Promise<void> {
-  const strategy = options.strategy || 'structured';
+  const { strategy = 'structured', ...embOpts } = options;
+  //const strategy = options.strategy || 'structured';
   const dbPath = customDbPath || findDbPath(undefined);
 
   if (!fs.existsSync(dbPath)) {
@@ -248,7 +249,7 @@ export async function buildEmbeddings(
   }
 
   console.log(`Embedding ${prepared.texts.length} symbols...`);
-  const { vectors, dim } = await embed(prepared.texts, modelKey);
+  const { vectors, dim } = await embed(prepared.texts, modelKey, embOpts);
 
   persistEmbeddings(db, prepared, vectors as Float32Array[], dim, config.name, strategy);
 

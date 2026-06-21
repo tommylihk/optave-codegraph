@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { setTimeout } from 'node:timers/promises';
 import { info } from '../../infrastructure/logger.js';
 import { ConfigError, EngineError } from '../../shared/errors.js';
 
@@ -294,17 +295,29 @@ async function loadModel(modelKey?: string): Promise<{ extractor: unknown; confi
   return { extractor, config };
 }
 
+export interface EmbedOptions {
+  batchSize?: number;
+  throttlePerBatchInMs?: number;
+  onBatchComplete?: (batchSize: number, embedded: number, total: number) => void;
+}
 /**
  * Generate embeddings for an array of texts.
  */
 export async function embed(
   texts: string[],
   modelKey?: string,
+  options: EmbedOptions = {},
 ): Promise<{ vectors: Float32Array[]; dim: number }> {
   const { extractor: ext, config } = await loadModel(modelKey);
   const dim = config.dim;
   const results: Float32Array[] = [];
-  const batchSize = BATCH_SIZE_MAP[modelKey || DEFAULT_MODEL] ?? DEFAULT_BATCH_SIZE;
+  const batchSize = (() => {
+    if (options.batchSize) {
+      return options.batchSize;
+    } else {
+      return BATCH_SIZE_MAP[modelKey || DEFAULT_MODEL] ?? DEFAULT_BATCH_SIZE;
+    }
+  })();
 
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize);
@@ -324,7 +337,18 @@ export async function embed(
     }
 
     if (texts.length > batchSize) {
-      process.stderr.write(`  Embedded ${Math.min(i + batchSize, texts.length)}/${texts.length}\r`);
+      if (global.gc) {
+        global.gc();
+      }
+
+      const embedded = Math.min(i + batchSize, texts.length);
+      process.stderr.write(`  Embedded ${embedded}/${texts.length}\r`);
+      if (options.onBatchComplete) {
+        options.onBatchComplete(batchSize, embedded, texts.length);
+      }
+      if (options.throttlePerBatchInMs) {
+        await setTimeout(options.throttlePerBatchInMs);
+      }
     }
   }
 
