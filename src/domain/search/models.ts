@@ -25,8 +25,8 @@ const _require = createRequire(import.meta.url);
  */
 export function resolveNpmInstallCwd(): string | undefined {
   try {
-    const pkgJsonPath = _require.resolve('@optave/codegraph/package.json');
-    // pkgJsonPath = <host>/node_modules/@optave/codegraph/package.json
+    const pkgJsonPath = _require.resolve('optave-codegraph/package.json');
+    // pkgJsonPath = <host>/node_modules/optave-codegraph/package.json
     // dirname x4: package.json → codegraph → @optave → node_modules → <host>
     return path.dirname(path.dirname(path.dirname(path.dirname(pkgJsonPath))));
   } catch {

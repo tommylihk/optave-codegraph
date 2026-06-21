@@ -6,7 +6,7 @@
  * utilities are not exported — import them directly if needed.
  *
  * Usage:
- *   import { buildGraph, queryNameData, findCycles, exportDOT } from '@optave/codegraph';
+ *   import { buildGraph, queryNameData, findCycles, exportDOT } from 'optave-codegraph';
  */
 
 export { buildGraph } from './domain/graph/builder.js';

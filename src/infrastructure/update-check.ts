@@ -9,7 +9,7 @@ const CACHE_PATH: string =
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const FETCH_TIMEOUT_MS = 3000;
-const REGISTRY_URL = 'https://registry.npmjs.org/@optave/codegraph/latest';
+const REGISTRY_URL = 'https://registry.npmjs.org/optave-codegraph/latest';
 
 interface UpdateCache {
   lastCheckedAt: number;
@@ -182,7 +182,7 @@ export async function checkForUpdates(
  */
 export function printUpdateNotification(current: string, latest: string): void {
   const msg1 = `Update available: ${current} → ${latest}`;
-  const msg2 = 'Run `npm i -g @optave/codegraph` to update';
+  const msg2 = 'Run `npm i -g optave-codegraph` to update';
   const width = Math.max(msg1.length, msg2.length) + 4;
 
   const top = `┌${'─'.repeat(width)}┐`;
