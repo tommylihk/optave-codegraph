@@ -1201,7 +1201,7 @@ async function parseFilesWasm(
       const relPath = path.relative(rootDir, filePath).split(path.sep).join('/');
       result.set(relPath, output);
       if (throttlePerFileInMs) {
-        await setTimeout(throttlePerFileInMs);
+        await setTimeout(Math.round(throttlePerFileInMs * 0.1));
       }
     }
     processed++;

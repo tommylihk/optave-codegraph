@@ -91,6 +91,7 @@
     "lint:fix": "biome check --write src/ tests/",
     "format": "biome format --write src/ tests/",
     "prepack": "npm run build",
+    "postpublish": "npm view optave-codegraph version",
     "prepublishOnly": "npm version patch --no-git-tag-version",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('.tsbuildinfo',{force:true})\"",
     "prepare": "npm run build && husky && npm run deps:tree",
