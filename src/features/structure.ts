@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { performance } from 'perf_hooks';
 import { getBuildMeta, getNodeId, setBuildMeta, testFilterSQL } from '../db/index.js';
 import { debug } from '../infrastructure/logger.js';
 import { normalizePath } from '../shared/constants.js';
@@ -386,6 +387,11 @@ function computeDirectoryMetrics(
 
 // ─── Build-time: insert directory nodes, contains edges, and metrics ────
 
+export interface BuildStructureOptions{
+  throttlePerFileInMs?: number;
+  onFileProcessed?: (filePath: string, current: number, total: number) => void
+}
+
 export function buildStructure(
   db: BetterSqlite3Database,
   fileSymbols: Map<string, FileSymbolData>,
@@ -394,6 +400,12 @@ export function buildStructure(
   directories: Set<string>,
   changedFiles?: string[] | null,
 ): void {
+  const start = performance.now();
+  const mark = (label: string) => {
+    console.log(`[buildStructure] ${label}: ${(performance.now() - start).toFixed(2)}ms`);
+    //debug(`[buildStructure] ${label}: ${(performance.now() - start).toFixed(2)}ms`);
+  };
+
   const insertNode = db.prepare(
     'INSERT OR IGNORE INTO nodes (name, kind, file, line, end_line) VALUES (?, ?, ?, ?, ?)',
   );
@@ -415,18 +427,23 @@ export function buildStructure(
   const isIncremental = changedFiles != null && changedFiles.length > 0;
 
   cleanupPreviousData(db, getNodeIdStmt, isIncremental, changedFiles ?? null);
+  mark('cleanupPreviousData');
 
   const allDirs = collectAllDirectories(directories, fileSymbols);
+  mark('collectAllDirectories');
 
   db.transaction(() => {
     for (const dir of allDirs) {
       insertNode.run(dir, 'directory', dir, 0, null);
     }
   })();
+  mark('insert directory nodes');
 
   insertContainsEdges(db, insertEdge, getNodeIdStmt, fileSymbols, allDirs, changedFiles ?? null);
+  mark('insertContainsEdges');
 
   const { fanInMap, fanOutMap, importEdges } = computeImportEdgeMaps(db);
+  mark('computeImportEdgeMaps');
 
   computeFileMetrics(
     db,
@@ -437,10 +454,13 @@ export function buildStructure(
     fanInMap,
     fanOutMap,
   );
+  mark('computeFileMetrics');
 
   computeDirectoryMetrics(db, upsertMetric, getNodeIdStmt, fileSymbols, allDirs, importEdges);
+  mark('computeDirectoryMetrics');
 
   debug(`Structure: ${allDirs.size} directories, ${fileSymbols.size} files with metrics`);
+  mark('complete');
 }
 
 // ─── Node role classification ─────────────────────────────────────────
