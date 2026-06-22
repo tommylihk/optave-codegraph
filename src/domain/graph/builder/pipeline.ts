@@ -281,6 +281,8 @@ async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = 
   // early without ever opening the native connection, saving ~5ms.
   // If nativeDb was opened by tryNativeOrchestrator (which fell through),
   // suspend it now to avoid dual-connection WAL corruption during stages.
+  const start = performance.now();
+
   if (ctx.db && ctx.nativeDb) {
     suspendNativeDb(ctx, 'pre-collect');
     // When nativeFirstProxy is true, ctx.db is a NativeDbProxy wrapping the
@@ -293,11 +295,15 @@ async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = 
   }
 
   await collectFiles(ctx);
+  console.log(`[perf] collectFiles: ${(performance.now() - start).toFixed(2)}ms`);
+
   await detectChanges(ctx);
+  console.log(`[perf] detectChanges: ${(performance.now() - start).toFixed(2)}ms`);
 
   if (ctx.earlyExit) return;
 
   await parseFiles(ctx, options);
+  console.log(`[perf] parseFiles: ${(performance.now() - start).toFixed(2)}ms`);
 
   // For small incremental builds (≤smallFilesThreshold files), skip the nativeDb open/close
   // cycle for insertNodes — the WAL checkpoint + connection churn (~5-10ms)
@@ -310,6 +316,7 @@ async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = 
   }
 
   await insertNodes(ctx);
+  console.log(`[perf] insertNodes: ${(performance.now() - start).toFixed(2)}ms`);
 
   // Close nativeDb after insertNodes — remaining pipeline stages use JS paths.
   if (ctx.nativeDb && ctx.db) {
@@ -318,8 +325,12 @@ async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = 
   }
 
   await resolveImports(ctx);
+  console.log(`[perf] resolveImports: ${(performance.now() - start).toFixed(2)}ms`);
+
   await buildEdges(ctx);
+  console.log(`[perf] buildEdges: ${(performance.now() - start).toFixed(2)}ms`);
   await buildStructure(ctx);
+  console.log(`[perf] buildStructure: ${(performance.now() - start).toFixed(2)}ms`);
 
   // Reopen nativeDb for feature modules (ast, cfg, complexity, dataflow).
   // Skip for small incremental builds — same rationale as insertNodes above.
@@ -344,6 +355,7 @@ async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = 
   }
 
   await runAnalyses(ctx);
+  console.log(`[perf] runAnalyses: ${(performance.now() - start).toFixed(2)}ms`);
 
   // Release WASM trees deterministically on the success path — same cleanup
   // as the error-path catch block.  Without this, trees stay allocated until
@@ -375,6 +387,7 @@ async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = 
   }
 
   await finalize(ctx);
+  console.log(`[perf] finalize: ${(performance.now() - start).toFixed(2)}ms`);
 }
 
 // ── Main entry point ────────────────────────────────────────────────────
