@@ -880,26 +880,52 @@ export async function runAnalyses(
   opts: AnalysisOpts,
   engineOpts?: EngineOpts,
 ): Promise<AnalysisTiming> {
-  const timing: AnalysisTiming = { astMs: 0, complexityMs: 0, cfgMs: 0, dataflowMs: 0 };
+  const startTime = performance.now();
+  const timing: AnalysisTiming = {
+    astMs: 0,
+    complexityMs: 0,
+    cfgMs: 0,
+    dataflowMs: 0,
+    _totalMs: 0,
+  };
+  timing._stepTimes = {};
 
   const doAst = opts.ast !== false;
   const doComplexity = opts.complexity !== false;
   const doCfg = opts.cfg !== false;
   const doDataflow = opts.dataflow !== false;
 
-  if (!doAst && !doComplexity && !doCfg && !doDataflow) return timing;
-
-  const extToLang = buildExtToLangMap();
-
-  if (await runFastPathIfApplicable(db, fileSymbols, rootDir, opts, engineOpts, timing)) {
+  if (!doAst && !doComplexity && !doCfg && !doDataflow) {
+    timing._totalMs = performance.now() - startTime;
     return timing;
   }
 
+  const extToLang = buildExtToLangMap();
+
+  let stepStart = performance.now();
+  const fastPath = await runFastPathIfApplicable(
+    db,
+    fileSymbols,
+    rootDir,
+    opts,
+    engineOpts,
+    timing,
+  );
+  timing._stepTimes.fastPath = performance.now() - stepStart;
+  if (fastPath) {
+    timing._totalMs = performance.now() - startTime;
+    return timing;
+  }
+
+  stepStart = performance.now();
   // Native analysis pass: try Rust standalone functions before WASM fallback.
   // This fills in complexity/CFG/dataflow for files that the native parse pipeline
   // missed, avoiding the need to parse with WASM + run JS visitors.
-  tryNativeStandaloneAnalysis(fileSymbols, rootDir, opts, extToLang);
 
+  tryNativeStandaloneAnalysis(fileSymbols, rootDir, opts, extToLang);
+  timing._stepTimes.tryNativeStandaloneAnalysis = performance.now() - stepStart;
+
+  stepStart = performance.now();
   // WASM pre-parse for files that still need it (AST store, or native gaps)
   await ensureWasmTreesIfNeeded(fileSymbols, opts, rootDir);
 
@@ -908,19 +934,29 @@ export async function runAnalyses(
   // just the DB-write tail in delegateToBuildFunctions.
   // _unifiedWalkMs is kept as a diagnostic cross-check (overlaps with the
   // per-phase timers above, not additive).
+  timing._stepTimes.ensureWasmTreesIfNeeded = performance.now() - stepStart;
+
+  stepStart = performance.now();
   timing._unifiedWalkMs = runUnifiedWalkPass(db, fileSymbols, extToLang, opts, timing);
+  timing._stepTimes.runUnifiedWalkPass = performance.now() - stepStart;
 
   // Reconcile: apply CFG-derived cyclomatic override for any definitions that have
   // both precomputed complexity and CFG data but whose cyclomatic was never overridden.
   // This closes a parity gap where native extractors provide both fields inline but
   // the override step (storeNativeCfgResults / storeCfgResults) is skipped because
   // detectNativeNeeds sees both as already present.
+
   if (doComplexity && doCfg) {
+    stepStart = performance.now();
     reconcileCfgCyclomatic(fileSymbols);
+    timing._stepTimes.reconcileCfgCyclomatic = performance.now() - stepStart;
   }
 
+  stepStart = performance.now();
   // Delegate to buildXxx functions for DB writes + native fallback
   await delegateToBuildFunctions(db, fileSymbols, rootDir, opts, engineOpts, timing);
+  timing._stepTimes.delegateToBuildFunctions = performance.now() - stepStart;
 
+  timing._totalMs = performance.now() - startTime;
   return timing;
 }

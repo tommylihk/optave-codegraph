@@ -904,6 +904,10 @@ export interface AnalysisTiming {
    * bucket. Useful for cross-checking that Σ phase timers ≈ this value.
    */
   _unifiedWalkMs?: number;
+  /** Total wall-clock time for the entire `runAnalyses` orchestration. */
+  _totalMs: number;
+  /** Granular timing breakdown for major orchestration steps. */
+  _stepTimes?: Record<string, number>;
 }
 
 /** An AST node row stored in the database. */

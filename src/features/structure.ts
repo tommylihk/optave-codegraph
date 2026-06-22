@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { getBuildMeta, getNodeId, setBuildMeta, testFilterSQL } from '../db/index.js';
 import { debug } from '../infrastructure/logger.js';
 import { normalizePath } from '../shared/constants.js';
@@ -387,9 +387,9 @@ function computeDirectoryMetrics(
 
 // ─── Build-time: insert directory nodes, contains edges, and metrics ────
 
-export interface BuildStructureOptions{
+export interface BuildStructureOptions {
   throttlePerFileInMs?: number;
-  onFileProcessed?: (filePath: string, current: number, total: number) => void
+  onFileProcessed?: (filePath: string, current: number, total: number) => void;
 }
 
 export function buildStructure(
