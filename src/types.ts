@@ -7,7 +7,7 @@
  * parsers, builders, visitors, features, config, and the graph model.
  */
 
-import type { ParseFileOpts } from '#domain/parser.js';
+import type { FileProcessOpts } from '#domain/parser.js';
 
 // ════════════════════════════════════════════════════════════════════════
 // §1  Symbol & Edge Kind Enumerations
@@ -1279,6 +1279,8 @@ export interface PipelineContext {
 
 /** Options for buildGraph. */
 export interface BuildGraphOpts {
+  fileProcessOpts?: FileProcessOpts;
+
   incremental?: boolean;
   engine?: EngineMode;
   dataflow?: boolean;
@@ -1314,8 +1316,6 @@ export interface BuildGraphOpts {
    * build command when stdin/stdout are TTYs and CI is not set.
    */
   promptForConsent?: boolean;
-
-  parseFileOptions?: ParseFileOpts;
 }
 
 /** Build timing result from buildGraph. */

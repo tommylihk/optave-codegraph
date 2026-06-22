@@ -4,6 +4,7 @@
  * Each stage reads what it needs and writes what it produces.
  * This replaces the closure-captured locals in the old monolithic buildGraph().
  */
+import type { FileProcessOpts } from '#domain/parser.js';
 import type {
   BetterSqlite3Database,
   BuildGraphOpts,
@@ -19,6 +20,8 @@ import type {
 } from '../../../types.js';
 
 export class PipelineContext {
+  fileProcessOpts?: FileProcessOpts;
+
   // ── Inputs (set during setup) ──────────────────────────────────────
   rootDir!: string;
   db!: BetterSqlite3Database;

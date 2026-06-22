@@ -1155,9 +1155,9 @@ async function backfillTypeMapBatch(
   }
 }
 
-export interface ParseFileOpts {
+export interface FileProcessOpts {
   throttlePerFileInMs?: number;
-  onFileProcessed?: (filePath: string, processed: number, total: number) => void;
+  onFileProcessed?: (filePath: string, processed: number, total: number, process?: string) => void;
 }
 
 /**
@@ -1175,7 +1175,7 @@ export interface ParseFileOpts {
 async function parseFilesWasm(
   filePaths: string[],
   rootDir: string,
-  options?: WorkerAnalysisOpts & ParseFileOpts,
+  options?: WorkerAnalysisOpts & FileProcessOpts,
 ): Promise<Map<string, ExtractorOutput>> {
   const { throttlePerFileInMs, onFileProcessed, ...analysis } = options || { ...FULL_ANALYSIS };
 
@@ -1380,7 +1380,7 @@ async function backfillNativeDrops(
 export async function parseFilesAuto(
   filePaths: string[],
   rootDir: string,
-  opts: ParseEngineOpts & ParseFileOpts = {},
+  opts: ParseEngineOpts & FileProcessOpts = {},
 ): Promise<Map<string, ExtractorOutput>> {
   const { throttlePerFileInMs, onFileProcessed, ...engOpt } = opts;
   const { native } = resolveEngine(engOpt);

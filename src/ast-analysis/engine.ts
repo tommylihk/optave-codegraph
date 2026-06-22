@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { bulkNodeIdsByFile } from '../db/index.js';
+import type { FileProcessOpts } from '../domain/parser.js';
 import { debug } from '../infrastructure/logger.js';
 import { loadNative } from '../infrastructure/native.js';
 import { toErrorMessage } from '../shared/errors.js';
@@ -635,8 +636,9 @@ async function delegateToBuildFunctions(
   fileSymbols: Map<string, ExtractorOutput>,
   rootDir: string,
   opts: AnalysisOpts,
-  engineOpts: EngineOpts | undefined,
   timing: AnalysisTiming,
+  engineOpts?: EngineOpts,
+  fileProcessOpts?: FileProcessOpts,
 ): Promise<void> {
   if (opts.ast !== false) {
     const t0 = performance.now();
@@ -653,7 +655,13 @@ async function delegateToBuildFunctions(
     const t0 = performance.now();
     try {
       const { buildComplexityMetrics } = await import('../features/complexity.js');
-      await buildComplexityMetrics(db, fileSymbols as Map<string, any>, rootDir, engineOpts);
+      await buildComplexityMetrics(
+        db,
+        fileSymbols as Map<string, any>,
+        rootDir,
+        engineOpts,
+        fileProcessOpts,
+      );
     } catch (err: unknown) {
       debug(`buildComplexityMetrics failed: ${toErrorMessage(err)}`);
     }
@@ -860,8 +868,9 @@ async function runFastPathIfApplicable(
   fileSymbols: Map<string, ExtractorOutput>,
   rootDir: string,
   opts: AnalysisOpts,
-  engineOpts: EngineOpts | undefined,
   timing: AnalysisTiming,
+  engineOpts?: EngineOpts,
+  fileProcessOptions?: FileProcessOpts,
 ): Promise<boolean> {
   if (!allNativeDataComplete(fileSymbols, opts)) return false;
 
@@ -869,7 +878,15 @@ async function runFastPathIfApplicable(
   const doComplexity = opts.complexity !== false;
   const doCfg = opts.cfg !== false;
   if (doComplexity && doCfg) reconcileCfgCyclomatic(fileSymbols);
-  await delegateToBuildFunctions(db, fileSymbols, rootDir, opts, engineOpts, timing);
+  await delegateToBuildFunctions(
+    db,
+    fileSymbols,
+    rootDir,
+    opts,
+    timing,
+    engineOpts,
+    fileProcessOptions,
+  );
   return true;
 }
 
@@ -879,6 +896,7 @@ export async function runAnalyses(
   rootDir: string,
   opts: AnalysisOpts,
   engineOpts?: EngineOpts,
+  fileProcessOptions?: FileProcessOpts,
 ): Promise<AnalysisTiming> {
   const startTime = performance.now();
   const timing: AnalysisTiming = {
@@ -908,8 +926,9 @@ export async function runAnalyses(
     fileSymbols,
     rootDir,
     opts,
-    engineOpts,
     timing,
+    engineOpts,
+    fileProcessOptions,
   );
   timing._stepTimes.fastPath = performance.now() - stepStart;
   if (fastPath) {
@@ -954,7 +973,15 @@ export async function runAnalyses(
 
   stepStart = performance.now();
   // Delegate to buildXxx functions for DB writes + native fallback
-  await delegateToBuildFunctions(db, fileSymbols, rootDir, opts, engineOpts, timing);
+  await delegateToBuildFunctions(
+    db,
+    fileSymbols,
+    rootDir,
+    opts,
+    timing,
+    engineOpts,
+    fileProcessOptions,
+  );
   timing._stepTimes.delegateToBuildFunctions = performance.now() - stepStart;
 
   timing._totalMs = performance.now() - startTime;

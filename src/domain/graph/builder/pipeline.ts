@@ -28,7 +28,7 @@ import { loadNative } from '../../../infrastructure/native.js';
 import { toErrorMessage } from '../../../shared/errors.js';
 import { CODEGRAPH_VERSION } from '../../../shared/version.js';
 import type { BuildGraphOpts, BuildResult } from '../../../types.js';
-import { getActiveEngine, type ParseFileOpts } from '../../parser.js';
+import { getActiveEngine } from '../../parser.js';
 import { writeJournalHeader } from '../journal.js';
 import { setWorkspaces } from '../resolve.js';
 import { PipelineContext } from './context.js';
@@ -274,7 +274,7 @@ function formatTimingResult(ctx: PipelineContext): BuildResult {
 
 // ── Pipeline stages execution ───────────────────────────────────────────
 
-async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = {}): Promise<void> {
+async function runPipelineStages(ctx: PipelineContext): Promise<void> {
   // ── WASM / fallback dual-connection mode ─────────────────────────────
   // NativeDatabase is deferred — not opened during setup. collectFiles and
   // detectChanges only need better-sqlite3. If no files changed, we exit
@@ -302,7 +302,7 @@ async function runPipelineStages(ctx: PipelineContext, options: ParseFileOpts = 
 
   if (ctx.earlyExit) return;
 
-  await parseFiles(ctx, options);
+  await parseFiles(ctx);
   console.log(`[perf] parseFiles: ${(performance.now() - start).toFixed(2)}ms`);
 
   // For small incremental builds (≤smallFilesThreshold files), skip the nativeDb open/close
@@ -401,12 +401,13 @@ export async function buildGraph(
   rootDir: string,
   opts: BuildGraphOpts = {},
 ): Promise<BuildResult | undefined> {
-  const { parseFileOptions } = opts;
+  const { fileProcessOpts } = opts;
 
   const ctx = new PipelineContext();
   ctx.buildStart = performance.now();
   ctx.opts = opts;
   ctx.rootDir = rootDir;
+  ctx.fileProcessOpts = fileProcessOpts;
 
   try {
     // Interactive consent prompt — only fires when the caller opts in (build
@@ -501,7 +502,7 @@ export async function buildGraph(
       }
     }
 
-    await runPipelineStages(ctx, parseFileOptions);
+    await runPipelineStages(ctx);
   } catch (err) {
     if (!ctx.earlyExit) {
       // Release WASM trees before closing DB to prevent V8 crash during

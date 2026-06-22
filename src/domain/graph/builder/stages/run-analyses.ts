@@ -9,11 +9,18 @@ import { warn } from '../../../../infrastructure/logger.js';
 import type { PipelineContext } from '../context.js';
 
 export async function runAnalyses(ctx: PipelineContext): Promise<void> {
-  const { db, allSymbols, rootDir, opts, engineOpts } = ctx;
+  const { db, allSymbols, rootDir, opts, engineOpts, fileProcessOpts } = ctx;
 
   const { runAnalyses: runAnalysesFn } = await import('../../../../ast-analysis/engine.js');
   try {
-    const analysisTiming = await runAnalysesFn(db, allSymbols, rootDir, opts, engineOpts);
+    const analysisTiming = await runAnalysesFn(
+      db,
+      allSymbols,
+      rootDir,
+      opts,
+      engineOpts,
+      fileProcessOpts,
+    );
     ctx.timing.astMs = analysisTiming.astMs;
     ctx.timing.complexityMs = analysisTiming.complexityMs;
     ctx.timing.cfgMs = analysisTiming.cfgMs;

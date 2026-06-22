@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout } from 'node:timers/promises';
 import {
   computeLOCMetrics as _computeLOCMetrics,
   computeMaintainabilityIndex as _computeMaintainabilityIndex,
@@ -13,6 +14,7 @@ import {
 import { walkWithVisitors } from '../ast-analysis/visitor.js';
 import { createComplexityVisitor } from '../ast-analysis/visitors/complexity-visitor.js';
 import { getFunctionNodeId } from '../db/index.js';
+import type { FileProcessOpts } from '../domain/parser.js';
 import { debug, info } from '../infrastructure/logger.js';
 import type {
   BetterSqlite3Database,
@@ -402,7 +404,10 @@ interface FileSymbols {
 
 async function initWasmParsersIfNeeded(
   fileSymbols: Map<string, FileSymbols>,
+  fileProcessOptions: FileProcessOpts = {},
 ): Promise<{ parsers: unknown; extToLang: Map<string, string> | null }> {
+  const { throttlePerFileInMs, onFileProcessed } = fileProcessOptions;
+  let processed = 0;
   for (const [relPath, symbols] of fileSymbols) {
     if (!symbols._tree) {
       const ext = path.extname(relPath).toLowerCase();
@@ -425,7 +430,15 @@ async function initWasmParsersIfNeeded(
         return { parsers, extToLang };
       }
     }
+
+    if (throttlePerFileInMs) {
+      await setTimeout(Math.round(throttlePerFileInMs * 0.1));
+    }
+
+    onFileProcessed?.(relPath, ++processed, fileSymbols.size, `initWasmParsersIfNeeded`);
+    processed++;
   }
+
   return { parsers: null, extToLang: null };
 }
 
@@ -687,8 +700,11 @@ async function computeJsFallbackMetrics(
   db: BetterSqlite3Database,
   fileSymbols: Map<string, FileSymbols>,
   rootDir: string,
+  fileProcessOptions: FileProcessOpts = {},
 ): Promise<void> {
-  const { parsers, extToLang } = await initWasmParsersIfNeeded(fileSymbols);
+  const { throttlePerFileInMs, onFileProcessed } = fileProcessOptions;
+
+  const { parsers, extToLang } = await initWasmParsersIfNeeded(fileSymbols, fileProcessOptions);
   const { getParser } = await import('../domain/parser.js');
 
   const upsert = db.prepare(
@@ -702,9 +718,9 @@ async function computeJsFallbackMetrics(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   let analyzed = 0;
-
-  const tx = db.transaction(() => {
-    for (const [relPath, symbols] of fileSymbols) {
+  let analyzedFile = 0;
+  for (const [relPath, symbols] of fileSymbols) {
+    db.transaction(() => {
       const result = getTreeForFile(symbols, relPath, rootDir, parsers, extToLang, getParser);
       const tree = result ? result.tree : null;
       const langId = result ? result.langId : null;
@@ -723,10 +739,15 @@ async function computeJsFallbackMetrics(
           analyzed += upsertAstComplexity(db, upsert, def, relPath, tree, langId, rules);
         }
       }
-    }
-  });
+    })();
 
-  tx();
+    onFileProcessed?.(relPath, ++analyzedFile, fileSymbols.size, 'computeJsFallbackMetrics');
+
+    // Yield control to the event loop to prevent hanging on slow machines
+    if (throttlePerFileInMs) {
+      await setTimeout(Math.round(throttlePerFileInMs * 0.1));
+    }
+  }
 
   if (analyzed > 0) {
     info(`Complexity: ${analyzed} functions analyzed`);
@@ -737,14 +758,15 @@ export async function buildComplexityMetrics(
   db: BetterSqlite3Database,
   fileSymbols: Map<string, FileSymbols>,
   rootDir: string,
-  engineOpts?: {
+  engineOpts: {
     nativeDb?: { bulkInsertComplexity?(rows: Array<Record<string, unknown>>): number };
     suspendJsDb?: () => void;
     resumeJsDb?: () => void;
-  },
+  } = {},
+  fileProcessOptions: FileProcessOpts = {},
 ): Promise<void> {
   if (tryNativeBulkInsert(db, fileSymbols, engineOpts)) return;
-  await computeJsFallbackMetrics(db, fileSymbols, rootDir);
+  await computeJsFallbackMetrics(db, fileSymbols, rootDir, fileProcessOptions);
 }
 
 // ─── Query-Time Functions (re-exported from complexity-query.ts) ──────────
