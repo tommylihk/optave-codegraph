@@ -435,7 +435,7 @@ async function initWasmParsersIfNeeded(
       await setTimeout(Math.round(throttlePerFileInMs * 0.1));
     }
 
-    onFileProcessed?.(relPath, ++processed, fileSymbols.size, `initWasmParsersIfNeeded`);
+    onFileProcessed?.(`initWasmParsersIfNeeded`, relPath, ++processed, fileSymbols.size);
     processed++;
   }
 
@@ -741,7 +741,7 @@ async function computeJsFallbackMetrics(
       }
     })();
 
-    onFileProcessed?.(relPath, ++analyzedFile, fileSymbols.size, 'computeJsFallbackMetrics');
+    onFileProcessed?.('computeJsFallbackMetrics', relPath, ++analyzedFile, fileSymbols.size);
 
     // Yield control to the event loop to prevent hanging on slow machines
     if (throttlePerFileInMs) {

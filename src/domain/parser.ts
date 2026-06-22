@@ -1157,7 +1157,7 @@ async function backfillTypeMapBatch(
 
 export interface FileProcessOpts {
   throttlePerFileInMs?: number;
-  onFileProcessed?: (filePath: string, processed: number, total: number, process?: string) => void;
+  onFileProcessed?: (process: string, filePath: string, processed: number, total: number) => void;
 }
 
 /**
@@ -1205,9 +1205,7 @@ async function parseFilesWasm(
       }
     }
     processed++;
-    if (onFileProcessed) {
-      onFileProcessed(filePath, processed, filePaths.length);
-    }
+    onFileProcessed?.('parseFilesWasm', filePath, processed, filePaths.length);
   }
   return result;
 }
